@@ -23,21 +23,28 @@ cat > "$APP_DIR/Contents/MacOS/bark" << 'LAUNCHER'
 DIR="__PROJECT_DIR__"
 LOG="$DIR/dictation.log"
 
+# Redirect ALL output (including bash errors) to log
+exec >> "$LOG" 2>&1
+
+echo ""
+echo "=== Bark launch $(date) ==="
+
 cd "$DIR" || {
     osascript -e 'display alert "Bark" message "Project folder not found.\n\nRebuild: cd /path/to/bark && ./create-app.sh" as critical'
     exit 1
 }
 
 if [ ! -d "$DIR/.venv" ]; then
-    osascript -e 'display alert "Bark" message "Virtual environment not found.\n\nRun setup:\ncd '"$DIR"'\npython3 -m venv .venv && source .venv/bin/activate\npip install -r requirements-mac.txt\n./create-app.sh" as warning'
+    osascript -e 'display alert "Bark" message "Virtual environment not found.\n\nRun setup first." as warning'
     exit 1
 fi
 
 source "$DIR/.venv/bin/activate"
+echo "Python: $(which python3) ($(python3 --version 2>&1))"
 
-python "$DIR/dictation.py" >> "$LOG" 2>&1 || {
+python3 "$DIR/dictation.py" || {
     LAST_ERR=$(tail -5 "$LOG" 2>/dev/null)
-    osascript -e "display alert \"Bark failed to start\" message \"Check $LOG for details.\n\n$LAST_ERR\" as critical"
+    osascript -e "display alert \"Bark crashed\" message \"$LAST_ERR\" as critical" 2>/dev/null
     exit 1
 }
 LAUNCHER

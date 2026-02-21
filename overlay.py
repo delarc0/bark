@@ -111,17 +111,21 @@ class Overlay:
             if os.path.exists(ICON_PATH):
                 self.root.iconbitmap(ICON_PATH)
         else:
-            # Mac: Single root window (no taskbar icon trick needed, no .ico support)
+            # Mac: Hidden root + Toplevel overlay (same pattern as Windows)
+            # Using root directly as overlay breaks the Cocoa event loop
             self._root = tk.Tk()
             self._root.title("Bark")
             self._root.protocol("WM_DELETE_WINDOW", self.quit)
-            self.root = self._root
+            self._root.withdraw()  # Hide root (no taskbar on Mac, so withdraw is fine)
+
+            self.root = tk.Toplevel(self._root)
+            self.root.title("Bark")
             self.root.overrideredirect(True)
             self.root.attributes("-topmost", True)
             try:
                 self.root.attributes("-alpha", 0.92)
             except tk.TclError:
-                pass  # Some macOS Tk builds don't support -alpha
+                pass
             self.root.configure(bg=BLACK)
 
         # Center at bottom of screen
