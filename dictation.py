@@ -125,11 +125,9 @@ def main():
             log.error(f"Processing failed: {e}", exc_info=True)
             ui.set_state("idle")
 
-    def init_backend():
+    def start_keyboard():
+        """Start keyboard hook on main thread (macOS HIToolbox requires main dispatch queue)."""
         try:
-            ctx["recorder"] = AudioRecorder()
-            ui.set_recorder(ctx["recorder"])
-            ctx["transcriber"] = Transcriber()
             ctx["hook"] = KeyboardHook(
                 on_record_start=on_record_start,
                 on_record_stop=on_record_stop,
@@ -139,6 +137,17 @@ def main():
             mode = "auto-stop" if AUTO_STOP else "hold-to-record"
             log.info(f"Ready ({mode}). Hold {TRIGGER_KEY_NAME} to dictate.")
             ui.set_state("idle")
+        except Exception as e:
+            log.error(f"Failed to start keyboard hook: {e}", exc_info=True)
+
+    def init_backend():
+        try:
+            ctx["recorder"] = AudioRecorder()
+            ui.set_recorder(ctx["recorder"])
+            ctx["transcriber"] = Transcriber()
+            # Schedule keyboard hook on main thread (macOS crashes if HIToolbox
+            # APIs are called from a background thread)
+            ui._root.after(0, start_keyboard)
         except Exception as e:
             log.error(f"Failed to initialize: {e}", exc_info=True)
 
