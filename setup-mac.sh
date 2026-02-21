@@ -72,6 +72,12 @@ fi
 
 echo "  Using: $PYTHON ($($PYTHON --version))"
 
+# Install python-tk for tkinter support (Homebrew Python doesn't include it)
+PY_MINOR=$(echo "$ver" | cut -d. -f2)
+TK_FORMULA="python-tk@3.${PY_MINOR}"
+echo "  Installing $TK_FORMULA (tkinter)..."
+brew install "$TK_FORMULA" 2>/dev/null || brew install python-tk 2>/dev/null || true
+
 # ── Step 4: Create virtual environment ────────────────────────────
 echo "[4/6] Creating virtual environment..."
 rm -rf .venv
