@@ -1,6 +1,5 @@
 import logging
 import math
-import threading
 
 import numpy as np
 import sounddevice as sd
@@ -65,12 +64,10 @@ _TONE_DONE = _generate_chime(BEEP_VOLUME * 0.5)
 
 
 def _play_async(data: np.ndarray):
-    def _play():
-        try:
-            sd.play(data, samplerate=SAMPLE_RATE, blocking=True)
-        except Exception as e:
-            log.warning(f"Beep failed: {e}")
-    threading.Thread(target=_play, daemon=True).start()
+    try:
+        sd.play(data, samplerate=SAMPLE_RATE, blocking=False)
+    except Exception as e:
+        log.warning(f"Beep failed: {e}")
 
 
 def beep_start():
