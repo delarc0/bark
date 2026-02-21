@@ -267,6 +267,13 @@ class Overlay:
     def set_recorder(self, recorder):
         self._recorder_ref = recorder
 
+    def set_sublabel(self, text: str):
+        """Update sublabel text without changing state (for loading progress)."""
+        try:
+            self._root.after(0, lambda: self.canvas.itemconfig(self._label, text=text))
+        except Exception:
+            pass
+
     def _start_wave(self):
         self._bar_heights = [0.0] * NUM_BARS
         for bar in self._bars:
