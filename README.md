@@ -178,4 +178,4 @@ config.py         Platform detection + configurable settings
 
 ---
 
-Built by [LAB37](https://lab37.se)
+Built by [LAB37](https://lab37.io)
