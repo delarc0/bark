@@ -4,16 +4,6 @@ import sys
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 
-# sounddevice/PortAudio crashes on Python 3.14+ macOS (GIL threading bug)
-if IS_MAC and sys.version_info >= (3, 14):
-    print(
-        f"ERROR: Python {sys.version_info.major}.{sys.version_info.minor} detected.\n"
-        "  Bark requires Python 3.11-3.13 on macOS.\n"
-        "  sounddevice (PortAudio) crashes on 3.14+ due to a GIL bug.\n"
-        "  Fix: brew install python@3.13 && ./setup-mac.sh"
-    )
-    sys.exit(1)
-
 # Model
 if IS_MAC:
     MODEL_SIZE = "mlx-community/whisper-large-v3-turbo"

@@ -1,4 +1,5 @@
 import logging
+import queue
 import threading
 import time
 from pynput import keyboard
@@ -16,9 +17,11 @@ if IS_MAC:
         CGEventGetIntegerValueField,
         CGEventGetFlags,
         CFMachPortCreateRunLoopSource,
-        CFRunLoopGetMain,
+        CFRunLoopGetCurrent,
         CFRunLoopAddSource,
         CFRunLoopRemoveSource,
+        CFRunLoopRun,
+        CFRunLoopStop,
         kCGSessionEventTap,
         kCGHeadInsertEventTap,
         kCGEventFlagsChanged,
@@ -50,6 +53,10 @@ class KeyboardHook:
         self._controller = keyboard.Controller()
         self._tap = None  # Quartz event tap (Mac only)
         self._tap_source = None  # CFRunLoopSource (Mac only)
+        self._tap_loop = None  # CFRunLoop for tap thread (Mac only)
+        self._tap_ready = threading.Event()
+        self._tap_failed = False
+        self._events = queue.Queue()  # Mac: decouple Quartz callback from Python work
         if IS_WIN:
             self._initial_caps_state = self._get_caps_state()
 
@@ -79,13 +86,16 @@ class KeyboardHook:
                 ).start()
             self._listener.suppress_event()
 
-    # --- Mac-specific (Quartz CGEventTap - runs on main thread) ---
+    # --- Mac-specific (Quartz CGEventTap on dedicated thread) ---
 
     def _mac_event_callback(self, proxy, event_type, event, refcon):
-        """Quartz event tap callback. Runs on the main thread's CFRunLoop."""
+        """Quartz event tap callback. Runs on the tap thread's CFRunLoop.
+
+        IMPORTANT: Do minimal Python work here to avoid GIL conflicts with
+        sounddevice's PortAudio thread. Just queue events for the main thread.
+        """
         # Re-enable if macOS disabled the tap due to slow callback
         if event_type == _TAP_DISABLED_BY_TIMEOUT:
-            log.warning("Event tap timed out, re-enabling...")
             CGEventTapEnable(self._tap, True)
             return event
 
@@ -101,19 +111,65 @@ class KeyboardHook:
 
         if option_down and not self._pressed:
             self._pressed = True
-            log.debug("Right Option pressed (Quartz)")
-            try:
-                self._on_record_start()
-            except Exception as e:
-                log.error(f"Record start failed: {e}")
+            self._events.put("start")
         elif not option_down and self._pressed:
             self._pressed = False
-            log.debug("Right Option released (Quartz)")
-            threading.Thread(
-                target=self._safe_record_stop, daemon=True
-            ).start()
+            self._events.put("stop")
 
         return event
+
+    def _run_tap(self):
+        """Run Quartz event tap on a dedicated thread with its own CFRunLoop.
+
+        This avoids GIL reentrancy: tkinter's mainloop releases the GIL into
+        Tcl/Tk, which drives the CFRunLoop. If the Quartz callback fires inside
+        that CFRunLoop, it re-enters Python with corrupted thread state, crashing
+        sounddevice's PortAudio callback thread. A separate CFRunLoop avoids this.
+        """
+        mask = 1 << kCGEventFlagsChanged
+        self._tap = CGEventTapCreate(
+            kCGSessionEventTap,
+            kCGHeadInsertEventTap,
+            0,  # active tap
+            mask,
+            self._mac_event_callback,
+            None,
+        )
+
+        if self._tap is None:
+            log.error(
+                "Failed to create event tap - Accessibility permission not granted. "
+                "Open System Settings > Privacy & Security > Accessibility and add Bark."
+            )
+            self._tap_failed = True
+            self._tap_ready.set()
+            return
+
+        self._tap_source = CFMachPortCreateRunLoopSource(None, self._tap, 0)
+        self._tap_loop = CFRunLoopGetCurrent()
+        CFRunLoopAddSource(self._tap_loop, self._tap_source, kCFRunLoopCommonModes)
+        CGEventTapEnable(self._tap, True)
+
+        log.info("Quartz event tap active (Right Option key).")
+        self._tap_ready.set()
+        CFRunLoopRun()  # Block on this thread's run loop
+
+    def poll_events(self):
+        """Process queued keyboard events. Call from tkinter after() loop."""
+        try:
+            while True:
+                event = self._events.get_nowait()
+                if event == "start":
+                    try:
+                        self._on_record_start()
+                    except Exception as e:
+                        log.error(f"Record start failed: {e}")
+                elif event == "stop":
+                    threading.Thread(
+                        target=self._safe_record_stop, daemon=True
+                    ).start()
+        except queue.Empty:
+            pass
 
     # --- Shared ---
 
@@ -158,36 +214,18 @@ class KeyboardHook:
             )
             self._listener.start()
         else:
-            # Quartz CGEventTap replaces pynput Listener on macOS.
-            # pynput's Listener spawns a thread that calls HIToolbox/TSM APIs,
-            # which macOS 26 requires on the main dispatch queue (crashes otherwise).
-            # CGEventTap fires on the main thread's CFRunLoop (shared with tkinter).
+            # Run Quartz CGEventTap on a dedicated thread to avoid GIL
+            # reentrancy with tkinter's mainloop + sounddevice's PortAudio.
             log.info("macOS: Keyboard monitoring requires Accessibility permission.")
             log.info("macOS: Grant in System Settings > Privacy & Security > Accessibility.")
 
-            mask = 1 << kCGEventFlagsChanged
-            self._tap = CGEventTapCreate(
-                kCGSessionEventTap,
-                kCGHeadInsertEventTap,
-                0,  # active tap (can observe + modify events)
-                mask,
-                self._mac_event_callback,
-                None,
-            )
+            self._tap_ready = threading.Event()
+            self._tap_failed = False
+            threading.Thread(target=self._run_tap, daemon=True).start()
 
-            if self._tap is None:
-                log.error(
-                    "Failed to create event tap - Accessibility permission not granted. "
-                    "Open System Settings > Privacy & Security > Accessibility and add Bark."
-                )
+            self._tap_ready.wait(timeout=5.0)
+            if self._tap_failed:
                 return False
-
-            self._tap_source = CFMachPortCreateRunLoopSource(None, self._tap, 0)
-            CFRunLoopAddSource(
-                CFRunLoopGetMain(), self._tap_source, kCFRunLoopCommonModes
-            )
-            CGEventTapEnable(self._tap, True)
-            log.info("Quartz event tap active (Right Option key).")
 
         log.info("Keyboard listener started.")
         return True
@@ -198,15 +236,20 @@ class KeyboardHook:
             if IS_WIN:
                 self._restore_caps_state()
         if IS_MAC:
-            if self._tap_source:
+            if self._tap_source and self._tap_loop:
                 try:
                     CFRunLoopRemoveSource(
-                        CFRunLoopGetMain(), self._tap_source, kCFRunLoopCommonModes
+                        self._tap_loop, self._tap_source, kCFRunLoopCommonModes
                     )
                 except Exception:
                     pass
             if self._tap:
                 try:
                     CGEventTapEnable(self._tap, False)
+                except Exception:
+                    pass
+            if self._tap_loop:
+                try:
+                    CFRunLoopStop(self._tap_loop)
                 except Exception:
                     pass

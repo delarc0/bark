@@ -40,7 +40,7 @@ from transcriber import Transcriber
 from keyboard_hook import KeyboardHook
 from feedback import beep_start, beep_stop, beep_done
 from overlay import Overlay
-from config import SAMPLE_RATE, MIN_AUDIO_DURATION, AUTO_STOP, TRIGGER_KEY_NAME
+from config import IS_MAC, SAMPLE_RATE, MIN_AUDIO_DURATION, AUTO_STOP, TRIGGER_KEY_NAME
 
 
 def main():
@@ -125,8 +125,14 @@ def main():
             log.error(f"Processing failed: {e}", exc_info=True)
             ui.set_state("idle")
 
+    def poll_keyboard():
+        """Poll keyboard event queue (Mac only). Runs on main thread via after()."""
+        if ctx["hook"]:
+            ctx["hook"].poll_events()
+        ui._root.after(5, poll_keyboard)
+
     def start_keyboard():
-        """Start keyboard hook on main thread (macOS Quartz requires main thread)."""
+        """Start keyboard hook."""
         try:
             ctx["hook"] = KeyboardHook(
                 on_record_start=on_record_start,
@@ -140,6 +146,9 @@ def main():
             mode = "auto-stop" if AUTO_STOP else "hold-to-record"
             log.info(f"Ready ({mode}). Hold {TRIGGER_KEY_NAME} to dictate.")
             ui.set_state("idle")
+            # Mac: poll the event queue from tkinter's main loop
+            if IS_MAC:
+                poll_keyboard()
         except Exception as e:
             log.error(f"Failed to start keyboard hook: {e}", exc_info=True)
             ui.set_state("error")
@@ -152,8 +161,7 @@ def main():
             ui.set_recorder(ctx["recorder"])
             ui.set_sublabel("WHISPER AI")
             ctx["transcriber"] = Transcriber()
-            # Schedule keyboard hook on main thread (macOS Quartz event tap
-            # must be added to the main thread's CFRunLoop)
+            # Schedule on main thread so poll_keyboard's after() loop runs there
             ui._root.after(0, start_keyboard)
         except Exception as e:
             log.error(f"Failed to initialize: {e}", exc_info=True)

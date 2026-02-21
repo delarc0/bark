@@ -23,17 +23,17 @@ else
 fi
 
 # ── Step 2: System dependencies ───────────────────────────────────
-echo "[2/6] Installing Python 3.13 and ffmpeg..."
-# Pin to 3.13 - sounddevice/PortAudio crashes on 3.14 (GIL threading bug)
-brew install python@3.13 ffmpeg 2>/dev/null || brew upgrade python@3.13 ffmpeg 2>/dev/null || true
+echo "[2/6] Installing Python and ffmpeg..."
+brew install python ffmpeg 2>/dev/null || brew upgrade python ffmpeg 2>/dev/null || true
 
-# ── Step 3: Find the right Python (arm64, 3.11-3.13) ─────────────
-echo "[3/6] Finding Python 3.11-3.13..."
+# ── Step 3: Find the right Python (arm64, 3.11+) ─────────────────
+echo "[3/6] Finding Python 3.11+..."
 PYTHON=""
 BREW_PREFIX="$(brew --prefix)"
 
-# Prefer 3.13, skip 3.14 (sounddevice/PortAudio GIL crash)
+# Try versioned Homebrew Pythons first (most specific), then generic
 for candidate in \
+    "$BREW_PREFIX/bin/python3.14" \
     "$BREW_PREFIX/bin/python3.13" \
     "$BREW_PREFIX/bin/python3.12" \
     "$BREW_PREFIX/bin/python3.11" \
@@ -43,14 +43,10 @@ for candidate in \
         continue
     fi
 
-    # Check version >= 3.11 and <= 3.13
+    # Check version >= 3.11
     ver=$("$candidate" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null) || continue
     minor=$(echo "$ver" | cut -d. -f2)
     if [ "$minor" -lt 11 ] 2>/dev/null; then
-        continue
-    fi
-    if [ "$minor" -ge 14 ] 2>/dev/null; then
-        echo "  Skipping $candidate ($ver - sounddevice incompatible with 3.14+)"
         continue
     fi
 
@@ -68,7 +64,7 @@ done
 if [ -z "$PYTHON" ]; then
     echo ""
     echo "ERROR: No suitable Python found."
-    echo "  Need: Python 3.11-3.13 (arm64) from Homebrew"
+    echo "  Need: Python 3.11+ (arm64) from Homebrew"
     echo "  Try:  brew install python@3.13"
     echo ""
     exit 1
