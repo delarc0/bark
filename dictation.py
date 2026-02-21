@@ -126,30 +126,36 @@ def main():
             ui.set_state("idle")
 
     def start_keyboard():
-        """Start keyboard hook on main thread (macOS HIToolbox requires main dispatch queue)."""
+        """Start keyboard hook on main thread (macOS Quartz requires main thread)."""
         try:
             ctx["hook"] = KeyboardHook(
                 on_record_start=on_record_start,
                 on_record_stop=on_record_stop,
             )
-            ctx["hook"].start()
+            if not ctx["hook"].start():
+                log.error("Keyboard hook failed to start. Check Accessibility permission.")
+                ui.set_state("error")
+                return
             ctx["ready"] = True
             mode = "auto-stop" if AUTO_STOP else "hold-to-record"
             log.info(f"Ready ({mode}). Hold {TRIGGER_KEY_NAME} to dictate.")
             ui.set_state("idle")
         except Exception as e:
             log.error(f"Failed to start keyboard hook: {e}", exc_info=True)
+            ui.set_state("error")
 
     def init_backend():
         try:
+            ui.set_state("loading")
             ctx["recorder"] = AudioRecorder()
             ui.set_recorder(ctx["recorder"])
             ctx["transcriber"] = Transcriber()
-            # Schedule keyboard hook on main thread (macOS crashes if HIToolbox
-            # APIs are called from a background thread)
+            # Schedule keyboard hook on main thread (macOS Quartz event tap
+            # must be added to the main thread's CFRunLoop)
             ui._root.after(0, start_keyboard)
         except Exception as e:
             log.error(f"Failed to initialize: {e}", exc_info=True)
+            ui.set_state("error")
 
     threading.Thread(target=init_backend, daemon=True).start()
 
