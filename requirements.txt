@@ -3,5 +3,6 @@ sounddevice>=0.4.6
 pynput>=1.7.6
 numpy>=1.24.0
 pyperclip>=1.8.2
+torchaudio
 nvidia-cublas-cu12
 nvidia-cudnn-cu12

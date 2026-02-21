@@ -110,7 +110,7 @@ echo [4/5] Installing PyTorch with CUDA support...
 echo   (This may take several minutes)
 echo.
 .venv\Scripts\pip.exe install --upgrade pip --quiet
-.venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cu121
+.venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 if errorlevel 1 (
     echo.
     echo   ERROR: PyTorch installation failed.
