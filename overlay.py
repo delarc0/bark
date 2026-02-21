@@ -1,16 +1,18 @@
-import ctypes
 import logging
 import os
 import random
+import sys
 import tkinter as tk
 
 log = logging.getLogger(__name__)
 
 # Register as a proper Windows app so the taskbar icon is pinnable
-try:
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("lab37.bark")
-except Exception:
-    pass
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("lab37.bark")
+    except Exception:
+        pass
 
 # LAB37 design system
 GREEN = "#42FC93"
@@ -86,10 +88,12 @@ class Overlay:
     def __init__(self, on_quit=None):
         self._on_quit = on_quit
 
+        _is_win = sys.platform == "win32"
+
         # Root window lives in the taskbar (NOT withdrawn - withdraw hides from taskbar)
         self._root = tk.Tk()
         self._root.title("Bark")
-        if os.path.exists(ICON_PATH):
+        if _is_win and os.path.exists(ICON_PATH):
             self._root.iconbitmap(ICON_PATH)
         self._root.protocol("WM_DELETE_WINDOW", self.quit)
         # Invisible but present in taskbar: off-screen + fully transparent
@@ -104,7 +108,7 @@ class Overlay:
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.92)
         self.root.configure(bg=BLACK)
-        if os.path.exists(ICON_PATH):
+        if _is_win and os.path.exists(ICON_PATH):
             self.root.iconbitmap(ICON_PATH)
 
         # Center at bottom of screen

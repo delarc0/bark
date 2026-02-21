@@ -4,11 +4,12 @@ import sys
 import threading
 import time
 
-# pythonw.exe sets stdout/stderr to None - redirect to devnull so libraries don't crash
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, "w")
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w")
+# pythonw.exe (Windows) sets stdout/stderr to None - redirect to devnull so libraries don't crash
+if sys.platform == "win32":
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
 
 # Setup logging first - writes to file so errors are visible even with pythonw.exe
 _dir = os.path.dirname(os.path.abspath(__file__))
@@ -22,21 +23,22 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Add NVIDIA CUDA DLLs to path before importing ctranslate2
-for _nvidia_dir in [
-    os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia", "cublas", "bin"),
-    os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia", "cudnn", "bin"),
-]:
-    if os.path.isdir(_nvidia_dir):
-        os.add_dll_directory(_nvidia_dir)
-        os.environ["PATH"] = _nvidia_dir + os.pathsep + os.environ.get("PATH", "")
+# Add NVIDIA CUDA DLLs to path before importing ctranslate2 (Windows only)
+if sys.platform == "win32":
+    for _nvidia_dir in [
+        os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia", "cublas", "bin"),
+        os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia", "cudnn", "bin"),
+    ]:
+        if os.path.isdir(_nvidia_dir):
+            os.add_dll_directory(_nvidia_dir)
+            os.environ["PATH"] = _nvidia_dir + os.pathsep + os.environ.get("PATH", "")
 
 from audio import AudioRecorder
 from transcriber import Transcriber
 from keyboard_hook import KeyboardHook
 from feedback import beep_start, beep_stop, beep_done
 from overlay import Overlay
-from config import SAMPLE_RATE, MIN_AUDIO_DURATION, AUTO_STOP
+from config import SAMPLE_RATE, MIN_AUDIO_DURATION, AUTO_STOP, TRIGGER_KEY_NAME
 
 
 def main():
@@ -133,7 +135,7 @@ def main():
             ctx["hook"].start()
             ctx["ready"] = True
             mode = "auto-stop" if AUTO_STOP else "hold-to-record"
-            log.info(f"Ready ({mode}). Hold Caps Lock to dictate.")
+            log.info(f"Ready ({mode}). Hold {TRIGGER_KEY_NAME} to dictate.")
             ui.set_state("idle")
         except Exception as e:
             log.error(f"Failed to initialize: {e}", exc_info=True)

@@ -1,8 +1,7 @@
 import logging
 import re
 import numpy as np
-from faster_whisper import WhisperModel
-from config import MODEL_SIZE, DEVICE, COMPUTE_TYPE, LANGUAGE, BEAM_SIZE
+from config import MODEL_SIZE, DEVICE, COMPUTE_TYPE, LANGUAGE, BEAM_SIZE, IS_MAC
 
 log = logging.getLogger(__name__)
 
@@ -50,12 +49,25 @@ def clean_text(text: str) -> str:
 
 class Transcriber:
     def __init__(self):
-        log.info(f"Loading model '{MODEL_SIZE}' on {DEVICE} ({COMPUTE_TYPE})...")
-        self.model = WhisperModel(
-            MODEL_SIZE,
-            device=DEVICE,
-            compute_type=COMPUTE_TYPE,
-        )
+        if IS_MAC:
+            import mlx_whisper
+            self._mlx = mlx_whisper
+            log.info(f"Loading model '{MODEL_SIZE}' with MLX (Metal)...")
+            # Warm up: run a tiny transcription to load the model into memory
+            self._mlx.transcribe(
+                np.zeros(BEAM_SIZE * 100, dtype=np.float32),
+                path_or_hf_repo=MODEL_SIZE,
+            )
+            self.model = None
+        else:
+            from faster_whisper import WhisperModel
+            self._mlx = None
+            log.info(f"Loading model '{MODEL_SIZE}' on {DEVICE} ({COMPUTE_TYPE})...")
+            self.model = WhisperModel(
+                MODEL_SIZE,
+                device=DEVICE,
+                compute_type=COMPUTE_TYPE,
+            )
         log.info("Model loaded.")
 
     def transcribe(self, audio: np.ndarray) -> str:
@@ -63,27 +75,49 @@ class Transcriber:
             return ""
 
         try:
-            segments, info = self.model.transcribe(
-                audio,
-                beam_size=BEAM_SIZE,
-                language=LANGUAGE,
-                vad_filter=True,
-                vad_parameters=dict(
-                    min_silence_duration_ms=500,
-                    speech_pad_ms=200,
-                ),
-            )
-
-            if LANGUAGE is None and info:
-                log.info(f"Detected language: {info.language} ({info.language_probability:.0%})")
-
-            text_parts = []
-            for segment in segments:
-                text_parts.append(segment.text.strip())
-
-            raw = " ".join(text_parts).strip()
-            return clean_text(raw)
-
+            if IS_MAC:
+                return self._transcribe_mlx(audio)
+            else:
+                return self._transcribe_faster_whisper(audio)
         except Exception as e:
             log.error(f"Transcription failed: {e}")
             return ""
+
+    def _transcribe_mlx(self, audio: np.ndarray) -> str:
+        result = self._mlx.transcribe(
+            audio,
+            path_or_hf_repo=MODEL_SIZE,
+            language=LANGUAGE,
+        )
+
+        if LANGUAGE is None and result.get("language"):
+            log.info(f"Detected language: {result['language']}")
+
+        text_parts = []
+        for segment in result.get("segments", []):
+            text_parts.append(segment["text"].strip())
+
+        raw = " ".join(text_parts).strip()
+        return clean_text(raw)
+
+    def _transcribe_faster_whisper(self, audio: np.ndarray) -> str:
+        segments, info = self.model.transcribe(
+            audio,
+            beam_size=BEAM_SIZE,
+            language=LANGUAGE,
+            vad_filter=True,
+            vad_parameters=dict(
+                min_silence_duration_ms=500,
+                speech_pad_ms=200,
+            ),
+        )
+
+        if LANGUAGE is None and info:
+            log.info(f"Detected language: {info.language} ({info.language_probability:.0%})")
+
+        text_parts = []
+        for segment in segments:
+            text_parts.append(segment.text.strip())
+
+        raw = " ".join(text_parts).strip()
+        return clean_text(raw)
