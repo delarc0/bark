@@ -31,51 +31,61 @@ echo.
 echo [2/5] Checking Python 3.11+...
 
 set PYTHON=
+set PYVER=
+set PY_MAJOR=0
+set PY_MINOR=0
 
-:: Check if python is available and >= 3.11
+:: Check if python is available
 where python >nul 2>&1
-if not errorlevel 1 (
-    for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PYVER=%%v
-    for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
-        if %%a==3 if %%b GEQ 11 (
-            set PYTHON=python
-            echo   Found: Python !PYVER!
-        )
-    )
+if errorlevel 1 goto :install_python
+
+:: Get version string
+for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PYVER=%%v
+for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
+    set PY_MAJOR=%%a
+    set PY_MINOR=%%b
 )
 
-if "!PYTHON!"=="" (
-    echo   Python 3.11+ not found. Installing via winget...
+if !PY_MAJOR! NEQ 3 goto :install_python
+if !PY_MINOR! LSS 11 goto :install_python
+
+set PYTHON=python
+echo   Found: Python !PYVER!
+goto :python_ok
+
+:install_python
+echo   Python 3.11+ not found. Installing via winget...
+echo.
+winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+if errorlevel 1 (
     echo.
-    winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements
-    if errorlevel 1 (
-        echo.
-        echo   ERROR: Could not install Python automatically.
-        echo   Please install Python 3.12+ manually from:
-        echo   https://www.python.org/downloads/
-        echo   Make sure to check "Add Python to PATH" during install.
-        echo   Then re-run this script.
-        echo.
-        pause
-        exit /b 1
-    )
-
-    :: Add likely install paths to current session PATH
-    set "PATH=%LOCALAPPDATA%\Programs\Python\Python312\;%LOCALAPPDATA%\Programs\Python\Python312\Scripts\;!PATH!"
-
-    where python >nul 2>&1
-    if errorlevel 1 (
-        echo.
-        echo   Python was installed but is not in PATH yet.
-        echo   Please close this window and re-run setup-win.bat
-        echo   (or restart your computer).
-        echo.
-        pause
-        exit /b 1
-    )
-    set PYTHON=python
-    for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do echo   Installed: Python %%v
+    echo   ERROR: Could not install Python automatically.
+    echo   Please install Python 3.12+ manually from:
+    echo   https://www.python.org/downloads/
+    echo   Make sure to check "Add Python to PATH" during install.
+    echo   Then re-run this script.
+    echo.
+    pause
+    exit /b 1
 )
+
+:: Add likely install paths to current session PATH
+set "PATH=%LOCALAPPDATA%\Programs\Python\Python312\;%LOCALAPPDATA%\Programs\Python\Python312\Scripts\;!PATH!"
+
+where python >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo   Python was installed but is not in PATH yet.
+    echo   Please close this window and re-run setup-win.bat
+    echo   (or restart your computer).
+    echo.
+    pause
+    exit /b 1
+)
+set PYTHON=python
+for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do echo   Installed: Python %%v
+
+:python_ok
 echo.
 
 :: ── Step 3: Create virtual environment ────────────────────────────
