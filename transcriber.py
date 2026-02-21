@@ -1,7 +1,7 @@
 import logging
 import re
 import numpy as np
-from config import MODEL_SIZE, DEVICE, COMPUTE_TYPE, LANGUAGE, BEAM_SIZE, IS_MAC
+from config import MODEL_SIZE, DEVICE, COMPUTE_TYPE, LANGUAGE, BEAM_SIZE, SAMPLE_RATE, IS_MAC
 
 log = logging.getLogger(__name__)
 
@@ -53,9 +53,9 @@ class Transcriber:
             import mlx_whisper
             self._mlx = mlx_whisper
             log.info(f"Loading model '{MODEL_SIZE}' with MLX (Metal)...")
-            # Warm up: run a tiny transcription to load the model into memory
+            # Warm up: run a 1-second silence transcription to load model into memory
             self._mlx.transcribe(
-                np.zeros(BEAM_SIZE * 100, dtype=np.float32),
+                np.zeros(SAMPLE_RATE, dtype=np.float32),
                 path_or_hf_repo=MODEL_SIZE,
             )
             self.model = None

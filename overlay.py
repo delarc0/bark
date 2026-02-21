@@ -6,13 +6,19 @@ import tkinter as tk
 
 log = logging.getLogger(__name__)
 
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+
 # Register as a proper Windows app so the taskbar icon is pinnable
-if sys.platform == "win32":
+if IS_WIN:
     try:
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("lab37.bark")
     except Exception:
         pass
+
+# Platform font: Consolas on Windows, Menlo on Mac
+MONO_FONT = "Consolas" if IS_WIN else "Menlo"
 
 # LAB37 design system
 GREEN = "#42FC93"
@@ -88,28 +94,40 @@ class Overlay:
     def __init__(self, on_quit=None):
         self._on_quit = on_quit
 
-        _is_win = sys.platform == "win32"
+        if IS_WIN:
+            # Windows: Root window lives in the taskbar (NOT withdrawn - withdraw hides from taskbar)
+            self._root = tk.Tk()
+            self._root.title("Bark")
+            if os.path.exists(ICON_PATH):
+                self._root.iconbitmap(ICON_PATH)
+            self._root.protocol("WM_DELETE_WINDOW", self.quit)
+            # Invisible but present in taskbar: off-screen + fully transparent
+            self._root.geometry("1x1+-10000+-10000")
+            self._root.attributes("-alpha", 0)
+            self._root.resizable(False, False)
 
-        # Root window lives in the taskbar (NOT withdrawn - withdraw hides from taskbar)
-        self._root = tk.Tk()
-        self._root.title("Bark")
-        if _is_win and os.path.exists(ICON_PATH):
-            self._root.iconbitmap(ICON_PATH)
-        self._root.protocol("WM_DELETE_WINDOW", self.quit)
-        # Invisible but present in taskbar: off-screen + fully transparent
-        self._root.geometry("1x1+-10000+-10000")
-        self._root.attributes("-alpha", 0)
-        self._root.resizable(False, False)
-
-        # Visible overlay is a borderless Toplevel child
-        self.root = tk.Toplevel(self._root)
-        self.root.title("Bark")
-        self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", 0.92)
-        self.root.configure(bg=BLACK)
-        if _is_win and os.path.exists(ICON_PATH):
-            self.root.iconbitmap(ICON_PATH)
+            # Visible overlay is a borderless Toplevel child
+            self.root = tk.Toplevel(self._root)
+            self.root.title("Bark")
+            self.root.overrideredirect(True)
+            self.root.attributes("-topmost", True)
+            self.root.attributes("-alpha", 0.92)
+            self.root.configure(bg=BLACK)
+            if os.path.exists(ICON_PATH):
+                self.root.iconbitmap(ICON_PATH)
+        else:
+            # Mac: Single root window (no taskbar icon trick needed, no .ico support)
+            self._root = tk.Tk()
+            self._root.title("Bark")
+            self._root.protocol("WM_DELETE_WINDOW", self.quit)
+            self.root = self._root
+            self.root.overrideredirect(True)
+            self.root.attributes("-topmost", True)
+            try:
+                self.root.attributes("-alpha", 0.92)
+            except tk.TclError:
+                pass  # Some macOS Tk builds don't support -alpha
+            self.root.configure(bg=BLACK)
 
         # Center at bottom of screen
         screen_w = self.root.winfo_screenwidth()
@@ -144,11 +162,19 @@ class Overlay:
         self.canvas.pack(fill="both", expand=True)
 
         # Scanlines (subtle CRT effect - dark on green)
-        for y_line in range(0, HEIGHT, 4):
-            self.canvas.create_line(
-                0, y_line, WIDTH, y_line,
-                fill=BLACK, stipple="gray12",
-            )
+        # stipple is X11-only and doesn't work on macOS Aqua Tk
+        if IS_WIN:
+            for y_line in range(0, HEIGHT, 4):
+                self.canvas.create_line(
+                    0, y_line, WIDTH, y_line,
+                    fill=BLACK, stipple="gray12",
+                )
+        else:
+            for y_line in range(0, HEIGHT, 4):
+                self.canvas.create_line(
+                    0, y_line, WIDTH, y_line,
+                    fill=GREEN_GLOW, width=1,
+                )
 
         # Status indicator square
         self._indicator = self.canvas.create_rectangle(
@@ -160,7 +186,7 @@ class Overlay:
         self._status_text = self.canvas.create_text(
             40, 16,
             text="STANDBY",
-            font=("Consolas", 13, "bold"),
+            font=(MONO_FONT, 13, "bold"),
             fill=BLACK,
             anchor="nw",
         )
@@ -169,7 +195,7 @@ class Overlay:
         self._label = self.canvas.create_text(
             40, 39,
             text="DICTATION",
-            font=("Consolas", 7),
+            font=(MONO_FONT, 7),
             fill=GREEN_DARK,
             anchor="nw",
         )
@@ -203,7 +229,7 @@ class Overlay:
             self.root, tearoff=0,
             bg=GREEN, fg=BLACK,
             activebackground=GREEN_BRIGHT, activeforeground=BLACK,
-            font=("Consolas", 9),
+            font=(MONO_FONT, 9),
             borderwidth=1,
             relief="solid",
         )
