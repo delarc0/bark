@@ -2,65 +2,94 @@
 
 **GPU-powered local dictation tool by LAB37.**
 
-Hold Caps Lock, speak, release. Text appears wherever your cursor is. No cloud, no API keys, no subscription. Runs entirely on your machine using your NVIDIA GPU.
+Hold a key, speak, release. Text appears wherever your cursor is. No cloud, no API keys, no subscription. Runs entirely on your machine.
 
 ## Features
 
-- **Hold-to-dictate** - Caps Lock as push-to-talk (suppressed so it doesn't toggle)
+- **Hold-to-dictate** - Push-to-talk trigger (Caps Lock on Windows, Right Option on Mac)
 - **Auto-stop** - Stops recording automatically when you stop speaking (Silero VAD)
 - **Pre-buffer** - Captures audio before you press the key so first words aren't cut off
 - **Multi-language** - Auto-detects Swedish, English, and 90+ other languages
-- **Fast** - Transcription in ~0.2-0.5s on an RTX 4090 (faster-whisper + CTranslate2)
+- **Fast** - ~0.2s on RTX 4090 (CUDA), ~0.5s on Apple Silicon (MLX Metal)
 - **Clean output** - Strips filler words, detects Whisper hallucinations
 - **Visual overlay** - Floating status bar with live waveform during recording
 - **Audio feedback** - Subtle terminal-style blips on start/done
-- **Clipboard paste** - Works in any app (pastes via Ctrl+V, restores clipboard after)
+- **Clipboard paste** - Works in any app (restores clipboard after)
+- **Cross-platform** - Windows and macOS
 
 ## Requirements
 
+### Windows
 - Windows 10/11
 - NVIDIA GPU with CUDA support (tested on RTX 4090)
 - Python 3.11+
 - NVIDIA drivers (CUDA 12.x)
 
+### Mac
+- macOS 13+ (Ventura or later)
+- Apple Silicon (M1/M2/M3/M4)
+- Python 3.11+
+- ffmpeg (`brew install ffmpeg`)
+
 ## Setup
 
+### Windows
+
 ```bash
-# Clone
 git clone https://github.com/delarc0/bark.git
 cd bark
 
-# Create virtual environment
 python -m venv .venv
 .venv\Scripts\activate
 
-# Install PyTorch with CUDA (required for Silero VAD)
+# PyTorch with CUDA (required for Silero VAD)
 pip install torch --index-url https://download.pytorch.org/whl/cu121
 
-# Install dependencies
 pip install -r requirements.txt
 ```
+
+### Mac
+
+```bash
+git clone https://github.com/delarc0/bark.git
+cd bark
+
+brew install ffmpeg
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -r requirements-mac.txt
+```
+
+**Important:** On first launch, macOS will ask for **Accessibility** permission (for keyboard monitoring) and **Microphone** permission. Grant both in System Settings > Privacy & Security.
 
 On first run, Bark will download the Whisper model (~1.5 GB) and Silero VAD model automatically.
 
 ## Usage
 
+### Windows
+
 ```bash
-# Run with console (for debugging)
-.venv\Scripts\python dictation.py
+.venv\Scripts\python dictation.py    # With console
+.venv\Scripts\pythonw dictation.py   # Without console
+start.bat                            # Double-click launcher
+```
 
-# Run without console window
-.venv\Scripts\pythonw dictation.py
+### Mac
 
-# Or use the batch launcher
-start.bat
+```bash
+python dictation.py
+# or
+./start.sh
 ```
 
 1. A small overlay appears at the bottom center of your screen
-2. **Hold Caps Lock** to record (overlay turns red, waveform animates)
-3. **Release** to transcribe (overlay turns yellow while processing)
-4. Text is pasted at your cursor position
-5. **Right-click** the overlay to quit
+2. **Hold Caps Lock** (Windows) or **Right Option** (Mac) to record
+3. Speak -- overlay shows waveform animation
+4. **Release** to transcribe (or wait for auto-stop after silence)
+5. Text is pasted at your cursor position
+6. **Right-click** the overlay to quit
 
 ## Configuration
 
@@ -68,7 +97,7 @@ Edit `config.py` to customize:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `MODEL_SIZE` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Whisper model (smaller = faster, less accurate) |
+| `MODEL_SIZE` | Auto-detected | Whisper model (platform-specific) |
 | `LANGUAGE` | `None` (auto) | Force a specific language, e.g. `"en"` or `"sv"` |
 | `AUTO_STOP` | `True` | Auto-stop recording after silence |
 | `SILENCE_TIMEOUT` | `1.5` | Seconds of silence before auto-stop |
@@ -79,18 +108,19 @@ Edit `config.py` to customize:
 ## Architecture
 
 ```
-dictation.py    Main entry point, orchestrates everything
-audio.py        Always-on mic stream, pre-buffer, Silero VAD
-transcriber.py  faster-whisper transcription + text cleanup
-keyboard_hook.py  Caps Lock hook (pynput + win32), clipboard paste
-overlay.py      Tkinter floating overlay with waveform visualization
-feedback.py     Audio feedback (frequency sweep blips)
-config.py       All configurable settings
+dictation.py      Main entry point, orchestrates everything
+audio.py          Always-on mic stream, pre-buffer, Silero VAD
+transcriber.py    Whisper transcription (faster-whisper on Windows, mlx-whisper on Mac)
+keyboard_hook.py  Trigger key hook (pynput), clipboard paste
+overlay.py        Tkinter floating overlay with waveform visualization
+feedback.py       Audio feedback via sounddevice
+config.py         Platform detection + configurable settings
 ```
 
 ## Built with
 
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) - CTranslate2 Whisper implementation
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) - CTranslate2 Whisper (Windows/CUDA)
+- [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) - MLX Whisper (Mac/Metal)
 - [Silero VAD](https://github.com/snakers4/silero-vad) - Voice activity detection
 - [pynput](https://github.com/moses-palmer/pynput) - Keyboard hooks
 

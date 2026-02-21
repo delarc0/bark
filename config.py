@@ -1,7 +1,19 @@
+import sys
+
+# Platform detection
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+
 # Model
-MODEL_SIZE = "deepdml/faster-whisper-large-v3-turbo-ct2"  # ~1.5GB, 6-8x faster than large-v3
-DEVICE = "cuda"
-COMPUTE_TYPE = "float16"
+if IS_MAC:
+    MODEL_SIZE = "mlx-community/whisper-large-v3-turbo"
+    DEVICE = "mlx"
+    COMPUTE_TYPE = None
+else:
+    MODEL_SIZE = "deepdml/faster-whisper-large-v3-turbo-ct2"  # ~1.5GB, 6-8x faster than large-v3
+    DEVICE = "cuda"
+    COMPUTE_TYPE = "float16"
+
 LANGUAGE = None  # None = auto-detect (Swedish, English, etc.)
 BEAM_SIZE = 5
 
@@ -22,8 +34,10 @@ BEEP_VOLUME = 0.3
 # Clipboard paste delay (seconds) - increase if paste doesn't work in some apps
 PASTE_DELAY = 0.15
 
-# Caps Lock virtual key code (Windows)
-VK_CAPITAL = 0x14
+# Trigger key
+if IS_WIN:
+    VK_CAPITAL = 0x14  # Caps Lock virtual key code (Windows)
+TRIGGER_KEY_NAME = "Caps Lock" if IS_WIN else "Right Option"
 
 # Logging
 LOG_FILE = "dictation.log"
