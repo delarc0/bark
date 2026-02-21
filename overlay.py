@@ -15,8 +15,9 @@ if IS_WIN:
     except Exception:
         pass
 
-# Platform font: Consolas on Windows, Menlo on Mac
-MONO_FONT = "Consolas" if IS_WIN else "Menlo"
+# Font: JetBrains Mono preferred, fallback to platform monospace
+MONO_FONT = "JetBrains Mono"
+MONO_FALLBACK = "Consolas" if IS_WIN else "Menlo"
 
 # LAB37 design system
 GREEN = "#42FC93"
@@ -79,16 +80,16 @@ LABELS = {
     "error": "ERROR",
 }
 
-WIDTH = 280
+WIDTH = 260
 HEIGHT = 64
 
 # Waveform config
-NUM_BARS = 20
+NUM_BARS = 16
 BAR_WIDTH = 3
-BAR_GAP = 3
-BAR_START_X = 152
-BAR_Y_CENTER = 31
-BAR_MAX_H = 20
+BAR_GAP = 2
+BAR_START_X = 140
+BAR_Y_CENTER = 25
+BAR_MAX_H = 18
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 ICON_PATH = os.path.join(_dir, "icon.ico")
@@ -115,7 +116,7 @@ class Overlay:
             self.root.title("Bark")
             self.root.overrideredirect(True)
             self.root.attributes("-topmost", True)
-            self.root.attributes("-alpha", 0.92)
+            self.root.attributes("-alpha", 0.85)
             self.root.configure(bg=BLACK)
             if os.path.exists(ICON_PATH):
                 self.root.iconbitmap(ICON_PATH)
@@ -130,10 +131,20 @@ class Overlay:
             self.root.overrideredirect(True)
             self.root.attributes("-topmost", True)
             try:
-                self.root.attributes("-alpha", 0.92)
+                self.root.attributes("-alpha", 0.85)
             except tk.TclError:
                 pass
             self.root.configure(bg=BLACK)
+
+        # Resolve font (check if JetBrains Mono is available)
+        self._font = MONO_FONT
+        try:
+            import tkinter.font as tkfont
+            available = tkfont.families(self._root if IS_MAC else None)
+            if MONO_FONT not in available:
+                self._font = MONO_FALLBACK
+        except Exception:
+            self._font = MONO_FALLBACK
 
         # Center at bottom of screen
         screen_w = self.root.winfo_screenwidth()
@@ -155,12 +166,22 @@ class Overlay:
             self.root.bind("<FocusIn>", lambda e: self.root.after(1, self._refocus))
             self._root.after(2000, self._enable_refocus)
 
+        # Drag to move
+        self._drag_x = 0
+        self._drag_y = 0
+        self.root.bind("<Button-1>", self._drag_start)
+        self.root.bind("<B1-Motion>", self._drag_move)
+
         # Right-click to quit
         self.root.bind("<Button-3>", self._show_menu)
 
-        # Outer diffuse glow layer
-        self._glow_outer = tk.Frame(self.root, bg=GREEN_DIM)
-        self._glow_outer.pack(fill="both", expand=True, padx=0, pady=0)
+        # Glow halo (outermost, visible during recording)
+        self._glow_halo = tk.Frame(self.root, bg=BLACK)
+        self._glow_halo.pack(fill="both", expand=True, padx=0, pady=0)
+
+        # Outer glow layer
+        self._glow_outer = tk.Frame(self._glow_halo, bg=GREEN_DIM)
+        self._glow_outer.pack(fill="both", expand=True, padx=3, pady=3)
 
         # Bright inner edge
         self._glow_edge = tk.Frame(self._glow_outer, bg=GREEN_GLOW)
@@ -170,15 +191,13 @@ class Overlay:
         inner = tk.Frame(self._glow_edge, bg=GREEN)
         inner.pack(fill="both", expand=True, padx=1, pady=1)
 
-        # Main canvas - green surface like a CTA button
+        # Main canvas
         self.canvas = tk.Canvas(
             inner, bg=GREEN, highlightthickness=0,
-            width=WIDTH - 4, height=HEIGHT - 4,
         )
         self.canvas.pack(fill="both", expand=True)
 
-        # Scanlines (subtle CRT effect - dark on green)
-        # stipple is X11-only and doesn't work on macOS Aqua Tk
+        # Scanlines (subtle CRT effect)
         if IS_WIN:
             for y_line in range(0, HEIGHT, 4):
                 self.canvas.create_line(
@@ -192,43 +211,46 @@ class Overlay:
                     fill=GREEN_GLOW, width=1,
                 )
 
-        # Status indicator square
+        # Status indicator square (vertically centered)
+        sq_size = 10
+        sq_x = 10
+        sq_y = BAR_Y_CENTER - sq_size // 2
         self._indicator = self.canvas.create_rectangle(
-            14, 18, 26, 30,
+            sq_x, sq_y, sq_x + sq_size, sq_y + sq_size,
             fill=GREEN_DARK, outline="",
         )
 
-        # Status text - black on green like website CTA buttons
+        # Status text (vertically centered top half)
         self._status_text = self.canvas.create_text(
-            40, 16,
+            28, 9,
             text="STANDBY",
-            font=(MONO_FONT, 13, "bold"),
+            font=(self._font, 14, "bold"),
             fill=BLACK,
             anchor="nw",
         )
 
-        # Small sublabel
+        # Sublabel (vertically centered bottom half)
         self._label = self.canvas.create_text(
-            40, 39,
+            28, 30,
             text="DICTATION",
-            font=(MONO_FONT, 7),
+            font=(self._font, 8),
             fill=GREEN_DARK,
             anchor="nw",
         )
 
-        # Waveform baseline (subtle scope line)
+        # Waveform baseline
         bar_end_x = BAR_START_X + NUM_BARS * (BAR_WIDTH + BAR_GAP)
         self.canvas.create_line(
             BAR_START_X, BAR_Y_CENTER, bar_end_x, BAR_Y_CENTER,
             fill=GREEN_GLOW, dash=(2, 4),
         )
 
-        # Waveform bars - black on green
+        # Waveform bars
         self._bars = []
         for i in range(NUM_BARS):
-            x = BAR_START_X + i * (BAR_WIDTH + BAR_GAP)
+            bx = BAR_START_X + i * (BAR_WIDTH + BAR_GAP)
             bar = self.canvas.create_rectangle(
-                x, BAR_Y_CENTER, x + BAR_WIDTH, BAR_Y_CENTER,
+                bx, BAR_Y_CENTER, bx + BAR_WIDTH, BAR_Y_CENTER,
                 fill=BLACK, outline="", state="hidden",
             )
             self._bars.append(bar)
@@ -240,12 +262,21 @@ class Overlay:
         self._pulse_on = True
         self._pulse_job = None
 
+    def _drag_start(self, event):
+        self._drag_x = event.x
+        self._drag_y = event.y
+
+    def _drag_move(self, event):
+        x = self.root.winfo_x() + (event.x - self._drag_x)
+        y = self.root.winfo_y() + (event.y - self._drag_y)
+        self.root.geometry(f"+{x}+{y}")
+
     def _show_menu(self, event):
         menu = tk.Menu(
             self.root, tearoff=0,
             bg=GREEN, fg=BLACK,
             activebackground=GREEN_BRIGHT, activeforeground=BLACK,
-            font=(MONO_FONT, 9),
+            font=(self._font, 9),
             borderwidth=1,
             relief="solid",
         )
@@ -332,7 +363,8 @@ class Overlay:
             self._root.after_cancel(self._pulse_job)
             self._pulse_job = None
 
-        # Update border glow layers
+        # Update glow layers (halo is outermost, only visible during recording)
+        self._glow_halo.configure(bg=BLACK)
         self._glow_outer.configure(bg=glow)
         self._glow_edge.configure(bg=edge)
 
@@ -368,12 +400,14 @@ class Overlay:
             return
         self._pulse_on = not self._pulse_on
         if self._pulse_on:
-            # Intense glow - outer halo + bright edge
+            # Intense glow - emanating halo
+            self._glow_halo.configure(bg=GREEN_DARK)
             self._glow_outer.configure(bg=GREEN)
             self._glow_edge.configure(bg=GREEN_BRIGHT)
             self.canvas.itemconfig(self._indicator, fill=RED)
         else:
             # Subtle dip
+            self._glow_halo.configure(bg=GREEN_DIM)
             self._glow_outer.configure(bg=GREEN_GLOW)
             self._glow_edge.configure(bg=GREEN)
             self.canvas.itemconfig(self._indicator, fill=RED_DIM)
