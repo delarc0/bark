@@ -86,104 +86,85 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 PLIST
 
 # Generate app icon - waveform bars in LAB37 green on dark background
+# Uses numpy for fast vectorized rendering (no per-pixel Python loops)
 ICONSET="$APP_DIR/Contents/Resources/bark.iconset"
 mkdir -p "$ICONSET"
 
 source "$SCRIPT_DIR/.venv/bin/activate" 2>/dev/null || true
 
 ICONSET="$ICONSET" python3 -c "
-import struct, zlib, math, os
-
-GREEN = (0x42, 0xFC, 0x93)
-GREEN_DIM = (0x1a, 0x6b, 0x3d)
-BG = (0x0d, 0x0d, 0x0f)
-
-def lerp(a, b, t):
-    t = max(0.0, min(1.0, t))
-    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
-
-def dist(x1, y1, x2, y2):
-    return math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+import struct, zlib, os
+import numpy as np
 
 def create_icon(size):
-    cx, cy = size / 2, size / 2
-    margin = size * 0.08
-    corner_r = size * 0.18
+    s = size
+    img = np.zeros((s, s, 4), dtype=np.uint8)
+
+    # Coordinate grids
+    yy, xx = np.mgrid[0:s, 0:s].astype(np.float32)
+    cx, cy = s / 2, s / 2
+
+    # Rounded rect mask
+    margin = s * 0.08
+    corner_r = s * 0.18
+    in_rect = (xx >= margin) & (xx < s - margin) & (yy >= margin) & (yy < s - margin)
+    # Cut corners
+    for (cxc, cyc) in [(margin + corner_r, margin + corner_r),
+                        (s - margin - corner_r, margin + corner_r),
+                        (margin + corner_r, s - margin - corner_r),
+                        (s - margin - corner_r, s - margin - corner_r)]:
+        corner_zone = ((xx < margin + corner_r) if cxc < cx else (xx > s - margin - corner_r)) & \
+                      ((yy < margin + corner_r) if cyc < cy else (yy > s - margin - corner_r))
+        dist = np.sqrt((xx - cxc)**2 + (yy - cyc)**2)
+        in_rect = in_rect & ~(corner_zone & (dist > corner_r))
+
+    # Dark background
+    img[in_rect] = [0x0d, 0x0d, 0x0f, 255]
+
+    # Scanlines
+    scanline = (yy % 4 == 0) & in_rect
+    img[scanline] = [0x0a, 0x0a, 0x0c, 255]
+
+    # Waveform bars
     bar_heights = [0.30, 0.55, 1.0, 0.70, 0.40]
-    num_bars = len(bar_heights)
-    bar_w = size * 0.09
-    bar_gap = size * 0.05
-    total_w = num_bars * bar_w + (num_bars - 1) * bar_gap
-    bars_x_start = (size - total_w) / 2
-    max_bar_h = size * 0.50
+    bar_w = s * 0.09
+    bar_gap = s * 0.05
+    total_w = len(bar_heights) * bar_w + (len(bar_heights) - 1) * bar_gap
+    x_start = (s - total_w) / 2
+    max_h = s * 0.50
 
-    rows = []
-    for y in range(size):
-        row = bytearray()
-        for x in range(size):
-            in_rect = (margin <= x < size - margin) and (margin <= y < size - margin)
-            if in_rect:
-                lx, rx = margin + corner_r, size - margin - corner_r
-                ty, by = margin + corner_r, size - margin - corner_r
-                in_corner = False
-                if x < lx and y < ty: in_corner = dist(x, y, lx, ty) > corner_r
-                elif x > rx and y < ty: in_corner = dist(x, y, rx, ty) > corner_r
-                elif x < lx and y > by: in_corner = dist(x, y, lx, by) > corner_r
-                elif x > rx and y > by: in_corner = dist(x, y, rx, by) > corner_r
-                if in_corner: in_rect = False
+    for i, bh in enumerate(bar_heights):
+        bx = x_start + i * (bar_w + bar_gap)
+        bar_h = bh * max_h
+        bar_top = cy - bar_h / 2
+        bar_bot = cy + bar_h / 2
 
-            if not in_rect:
-                row.extend([0, 0, 0, 0])
-                continue
+        bar_mask = (xx >= bx) & (xx < bx + bar_w) & (yy >= bar_top) & (yy <= bar_bot) & in_rect
+        img[bar_mask] = [0x42, 0xFC, 0x93, 255]
 
-            r, g, b = BG
-            in_bar = False
-            glow_intensity = 0.0
+        # Glow around bar
+        glow_r = s * 0.04
+        glow_zone = (xx >= bx - glow_r) & (xx < bx + bar_w + glow_r) & \
+                    (yy >= bar_top - glow_r) & (yy <= bar_bot + glow_r) & \
+                    in_rect & ~bar_mask
+        if np.any(glow_zone):
+            dx = np.maximum(0, np.maximum(bx - xx, xx - (bx + bar_w)))
+            dy = np.maximum(0, np.maximum(bar_top - yy, yy - bar_bot))
+            d = np.sqrt(dx**2 + dy**2)
+            glow_mask = glow_zone & (d < glow_r)
+            if np.any(glow_mask):
+                t = (1.0 - d[glow_mask] / glow_r) * 0.4 * bh
+                img[glow_mask, 0] = (0x0d + t * (0x1a - 0x0d)).astype(np.uint8)
+                img[glow_mask, 1] = (0x0d + t * (0x6b - 0x0d)).astype(np.uint8)
+                img[glow_mask, 2] = (0x0f + t * (0x3d - 0x0f)).astype(np.uint8)
 
-            for i, bh in enumerate(bar_heights):
-                bx = bars_x_start + i * (bar_w + bar_gap)
-                bar_h = bh * max_bar_h
-                bar_top, bar_bot = cy - bar_h / 2, cy + bar_h / 2
-                bar_cx = bx + bar_w / 2
-
-                if bx <= x < bx + bar_w and bar_top <= y <= bar_bot:
-                    in_bar = True
-                    dx = abs(x - bar_cx) / (bar_w / 2)
-                    dy = abs(y - cy) / (bar_h / 2)
-                    edge = max(dx, dy * 0.3)
-                    r, g, b = lerp(GREEN, GREEN_DIM, edge * 0.6)
-                    break
-
-                # Glow halo around each bar
-                d = 0.0
-                if bx <= x < bx + bar_w:
-                    d = max(0, bar_top - y) if y < bar_top else max(0, y - bar_bot)
-                elif bar_top <= y <= bar_bot:
-                    d = max(0, bx - x) if x < bx else max(0, x - (bx + bar_w))
-                else:
-                    corners = [(bx, bar_top), (bx + bar_w, bar_top), (bx, bar_bot), (bx + bar_w, bar_bot)]
-                    d = min(dist(x, y, cx2, cy2) for cx2, cy2 in corners)
-                glow_r = size * 0.06
-                if d < glow_r:
-                    gi = (1.0 - d / glow_r) * 0.35 * bh
-                    glow_intensity = max(glow_intensity, gi)
-
-            if not in_bar and glow_intensity > 0:
-                r, g, b = lerp(BG, GREEN_DIM, glow_intensity)
-
-            # Subtle scanlines
-            if y % 4 == 0:
-                r, g, b = int(r * 0.85), int(g * 0.85), int(b * 0.85)
-
-            row.extend([r, g, b, 255])
-        rows.append(bytes([0]) + bytes(row))
-
-    raw = b''.join(rows)
+    # Encode PNG
+    raw = b''.join(bytes([0]) + row.tobytes() for row in img)
     def chunk(ct, data):
         c = ct + data
         return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xFFFFFFFF)
-    ihdr = struct.pack('>IIBBBBB', size, size, 8, 6, 0, 0, 0)
-    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', zlib.compress(raw, 9)) + chunk(b'IEND', b'')
+    ihdr = struct.pack('>IIBBBBB', s, s, 8, 6, 0, 0, 0)
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
 
 iconset = os.environ['ICONSET']
 for sz, name in [(16,'16x16'),(32,'16x16@2x'),(32,'32x32'),(64,'32x32@2x'),(128,'128x128'),(256,'128x128@2x'),(256,'256x256'),(512,'256x256@2x'),(512,'512x512'),(1024,'512x512@2x')]:
