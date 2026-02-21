@@ -1,7 +1,6 @@
 import logging
 import os
 import random
-import sys
 import tkinter as tk
 
 from config import IS_WIN, IS_MAC

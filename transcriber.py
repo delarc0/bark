@@ -93,11 +93,7 @@ class Transcriber:
         if LANGUAGE is None and result.get("language"):
             log.info(f"Detected language: {result['language']}")
 
-        text_parts = []
-        for segment in result.get("segments", []):
-            text_parts.append(segment["text"].strip())
-
-        raw = " ".join(text_parts).strip()
+        raw = " ".join(s["text"].strip() for s in result.get("segments", [])).strip()
         return clean_text(raw)
 
     def _transcribe_faster_whisper(self, audio: np.ndarray) -> str:
@@ -115,9 +111,5 @@ class Transcriber:
         if LANGUAGE is None and info:
             log.info(f"Detected language: {info.language} ({info.language_probability:.0%})")
 
-        text_parts = []
-        for segment in segments:
-            text_parts.append(segment.text.strip())
-
-        raw = " ".join(text_parts).strip()
+        raw = " ".join(s.text.strip() for s in segments).strip()
         return clean_text(raw)
