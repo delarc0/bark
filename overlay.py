@@ -130,6 +130,10 @@ class Overlay:
         y = screen_h - HEIGHT - 60
         self.root.geometry(f"{WIDTH}x{HEIGHT}+{x}+{y}")
 
+        # Ensure overlay is visible (especially on Mac with LSUIElement=true)
+        self.root.lift()
+        self.root.update_idletasks()
+
         # Prevent stealing focus (delay enables it after initial render)
         self._refocus_enabled = False
         self.root.bind("<FocusIn>", lambda e: self.root.after(1, self._refocus))
