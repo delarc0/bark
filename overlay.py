@@ -115,15 +115,9 @@ class Overlay:
             self.root = self._root
             self.root.title("Bark")
             self.root.protocol("WM_DELETE_WINDOW", self.quit)
-            # Use macOS-native window style for borderless floating panel
-            # (overrideredirect doesn't work reliably on macOS Aqua Tk)
-            try:
-                self.root.tk.call(
-                    '::tk::unsupported::MacWindowStyle', 'style',
-                    self.root._w, 'plain', 'none',
-                )
-            except tk.TclError:
-                self.root.overrideredirect(True)
+            # Withdraw before configuring to prevent flash of normal window
+            self.root.withdraw()
+            self.root.overrideredirect(True)
             self.root.attributes("-topmost", True)
             try:
                 self.root.attributes("-alpha", 0.92)
@@ -138,7 +132,9 @@ class Overlay:
         y = screen_h - HEIGHT - 60
         self.root.geometry(f"{WIDTH}x{HEIGHT}+{x}+{y}")
 
-        # Ensure overlay is visible (especially on Mac with LSUIElement=true)
+        # Show the window now that geometry is set (Mac: was withdrawn during setup)
+        if IS_MAC:
+            self.root.deiconify()
         self.root.lift()
         self.root.update_idletasks()
 
