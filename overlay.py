@@ -4,10 +4,9 @@ import random
 import sys
 import tkinter as tk
 
-log = logging.getLogger(__name__)
+from config import IS_WIN, IS_MAC
 
-IS_WIN = sys.platform == "win32"
-IS_MAC = sys.platform == "darwin"
+log = logging.getLogger(__name__)
 
 # Register as a proper Windows app so the taskbar icon is pinnable
 if IS_WIN:
@@ -27,10 +26,6 @@ GREEN_DIM = "#1a6b3d"
 GREEN_GLOW = "#2aad62"
 GREEN_DARK = "#0d3520"
 BLACK = "#000000"
-SURFACE = "#111113"
-BORDER = "#27272A"
-TEXT_DIM = "#52525B"
-TEXT_MED = "#A1A1AA"
 RED = "#FF3333"
 RED_DIM = "#661111"
 AMBER = "#FFD700"
