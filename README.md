@@ -60,6 +60,9 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements-mac.txt
+
+# Create the app (one-time)
+chmod +x create-app.sh && ./create-app.sh
 ```
 
 **Important:** On first launch, macOS will ask for **Accessibility** permission (for keyboard monitoring) and **Microphone** permission. Grant both in System Settings > Privacy & Security.
@@ -78,9 +81,10 @@ start.bat                            # Double-click launcher
 
 ### Mac
 
+Double-click **Bark.app** in Finder, or drag it to your Dock.
+
 ```bash
-python dictation.py
-# or
+# Or from terminal:
 ./start.sh
 ```
 
