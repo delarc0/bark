@@ -4,10 +4,10 @@ import sys
 import threading
 import time
 
-_is_win = sys.platform == "win32"
+from config import IS_WIN
 
 # pythonw.exe (Windows) sets stdout/stderr to None - redirect to devnull so libraries don't crash
-if _is_win:
+if IS_WIN:
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w")
     if sys.stderr is None:
@@ -26,7 +26,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # Add NVIDIA CUDA DLLs to path before importing ctranslate2 (Windows only)
-if _is_win:
+if IS_WIN:
     for _nvidia_dir in [
         os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia", "cublas", "bin"),
         os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia", "cudnn", "bin"),

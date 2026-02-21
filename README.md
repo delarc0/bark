@@ -25,7 +25,7 @@ Hold a key, speak, release. Text appears wherever your cursor is. No cloud, no A
 
 - macOS 13+ (Ventura or later)
 - Apple Silicon (M1/M2/M3/M4)
-- Python 3.11+ (`brew install python` if needed)
+- Python 3.11+ from Homebrew (`brew install python`) -- do NOT use the system `/usr/bin/python3` (too old)
 - ffmpeg (`brew install ffmpeg`)
 - Homebrew ([brew.sh](https://brew.sh) if you don't have it)
 
@@ -43,7 +43,8 @@ brew install python ffmpeg
 git clone https://github.com/delarc0/bark.git
 cd bark
 
-python3 -m venv .venv
+# IMPORTANT: Use Homebrew Python, not system Python
+/opt/homebrew/bin/python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-mac.txt
 ```
@@ -88,6 +89,8 @@ If the overlay doesn't appear after granting permissions, quit and relaunch Bark
 | Transcription is slow on first use | The first transcription loads the model into Metal memory. Subsequent ones are ~0.5s. |
 | No sound feedback | Check that your default audio output device is set correctly in System Settings > Sound. |
 | Model download fails | Make sure you have internet access. The Whisper model downloads from Hugging Face (~1.5 GB). |
+| `incompatible architecture` or numpy import error | You're using the system Python (x86_64). Delete `.venv`, then recreate with Homebrew Python: `/opt/homebrew/bin/python3 -m venv .venv` |
+| App flashes and closes | Check `dictation.log` for errors. Most common: wrong Python version (need 3.11+ from Homebrew). |
 
 ### Updating
 
