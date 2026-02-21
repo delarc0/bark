@@ -38,6 +38,3 @@ PASTE_DELAY = 0.15
 if IS_WIN:
     VK_CAPITAL = 0x14  # Caps Lock virtual key code (Windows)
 TRIGGER_KEY_NAME = "Caps Lock" if IS_WIN else "Right Option"
-
-# Logging
-LOG_FILE = "dictation.log"

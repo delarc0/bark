@@ -1,9 +1,6 @@
-import io
 import logging
 import math
-import struct
 import threading
-import wave
 
 import numpy as np
 import sounddevice as sd

@@ -21,15 +21,9 @@ MAC_TRIGGER = keyboard.Key.alt_r  # Right Option
 
 
 def _check_mac_accessibility():
-    """Check if the app has Accessibility permission on macOS (required for keyboard monitoring)."""
-    try:
-        import subprocess
-        # This is a known trick: if we can create an event tap, we have permission.
-        # But simpler: just warn in logs and let pynput fail gracefully.
-        log.info("macOS: Keyboard monitoring requires Accessibility permission.")
-        log.info("macOS: Grant in System Settings > Privacy & Security > Accessibility.")
-    except Exception:
-        pass
+    """Remind user about Accessibility permission on macOS (required for keyboard monitoring)."""
+    log.info("macOS: Keyboard monitoring requires Accessibility permission.")
+    log.info("macOS: Grant in System Settings > Privacy & Security > Accessibility.")
 
 
 class KeyboardHook:
