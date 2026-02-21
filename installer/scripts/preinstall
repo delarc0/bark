@@ -1,0 +1,20 @@
+#!/bin/bash
+# preinstall - Validates system before Bark installation.
+# Runs as root. Exit 1 to abort the install.
+
+# Check Apple Silicon (MLX requires arm64)
+ARCH=$(uname -m)
+if [ "$ARCH" != "arm64" ]; then
+    osascript -e 'display alert "Bark requires Apple Silicon" message "This Mac has an Intel processor. Bark uses MLX (Metal) for speech recognition, which requires Apple Silicon (M1 or later)." as critical'
+    exit 1
+fi
+
+# Check macOS 13+ (Ventura required for MLX)
+MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+if [ "$MACOS_MAJOR" -lt 13 ] 2>/dev/null; then
+    MACOS_VER=$(sw_vers -productVersion)
+    osascript -e "display alert \"Bark requires macOS 13 or later\" message \"This Mac is running macOS $MACOS_VER. Please update to macOS Ventura (13) or later.\" as critical"
+    exit 1
+fi
+
+exit 0

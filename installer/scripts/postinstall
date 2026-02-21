@@ -1,0 +1,30 @@
+#!/bin/bash
+# postinstall - Runs as root after files are placed in /usr/local/lib/bark.
+# Fixes ownership and launches setup in Terminal as the real user.
+
+BARK_DIR="/usr/local/lib/bark"
+
+# Determine the real (non-root) user who initiated the install
+REAL_USER=$(stat -f '%Su' /dev/console 2>/dev/null)
+if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+    REAL_USER=$(ls -ld /Users/* 2>/dev/null | grep -v Shared | head -1 | awk '{print $3}')
+fi
+
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+    # Fix ownership so user can create .venv, pip install, etc.
+    chown -R "$REAL_USER" "$BARK_DIR"
+    chown "$REAL_USER" /usr/local/lib 2>/dev/null || true
+fi
+
+# Make scripts executable
+chmod +x "$BARK_DIR/setup-mac.sh"
+chmod +x "$BARK_DIR/create-app.sh"
+
+# Launch Terminal to run setup as the real user
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+    sudo -u "$REAL_USER" open -a Terminal "$BARK_DIR/setup-mac.sh"
+else
+    open -a Terminal "$BARK_DIR/setup-mac.sh"
+fi
+
+exit 0
