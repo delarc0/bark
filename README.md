@@ -17,23 +17,100 @@ Hold a key, speak, release. Text appears wherever your cursor is. No cloud, no A
 - **Clipboard paste** - Works in any app (restores clipboard after)
 - **Cross-platform** - Windows and macOS
 
-## Requirements
+---
 
-### Windows
+## Mac Setup
+
+### Requirements
+
+- macOS 13+ (Ventura or later)
+- Apple Silicon (M1/M2/M3/M4)
+- Python 3.11+ (`brew install python` if needed)
+- ffmpeg (`brew install ffmpeg`)
+- Homebrew ([brew.sh](https://brew.sh) if you don't have it)
+
+### Step 1: Install system dependencies
+
+Open Terminal and run:
+
+```bash
+brew install python ffmpeg
+```
+
+### Step 2: Clone and set up
+
+```bash
+git clone https://github.com/delarc0/bark.git
+cd bark
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-mac.txt
+```
+
+This installs mlx-whisper (Metal-accelerated), Silero VAD, pynput, sounddevice, and other dependencies.
+
+### Step 3: Create the app
+
+```bash
+chmod +x create-app.sh
+./create-app.sh
+```
+
+This creates `Bark.app` in the project folder. You can drag it to your Dock or Applications folder.
+
+### Step 4: First launch
+
+Double-click **Bark.app** in Finder. On first launch:
+
+1. macOS will ask for **Microphone** permission -- click Allow
+2. macOS will ask for **Accessibility** permission -- click "Open System Settings", then toggle Bark on under Privacy & Security > Accessibility
+3. Bark downloads the Whisper model (~1.5 GB) and Silero VAD model automatically. This takes a minute the first time, then it's cached.
+
+If the overlay doesn't appear after granting permissions, quit and relaunch Bark.app.
+
+### Step 5: Use it
+
+1. A small green overlay appears at the bottom center of your screen
+2. **Hold Right Option** (the Option key on the right side of your keyboard) to record
+3. Speak -- the overlay shows a waveform animation
+4. **Release** to transcribe, or just stop talking (auto-stop after 1.5s of silence)
+5. Transcribed text is pasted at your cursor position
+6. **Right-click** the overlay to quit
+
+### Mac troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| Nothing happens when I press Right Option | Grant Accessibility permission: System Settings > Privacy & Security > Accessibility. Toggle Bark (or Terminal/iTerm if running from terminal) on. Restart Bark. |
+| "Bark.app is damaged" or can't be opened | Run `xattr -cr Bark.app` in terminal from the bark folder, then try again. |
+| Overlay doesn't appear | Check `dictation.log` in the bark folder for errors. Make sure `.venv` exists. |
+| Transcription is slow on first use | The first transcription loads the model into Metal memory. Subsequent ones are ~0.5s. |
+| No sound feedback | Check that your default audio output device is set correctly in System Settings > Sound. |
+| Model download fails | Make sure you have internet access. The Whisper model downloads from Hugging Face (~1.5 GB). |
+
+### Updating
+
+```bash
+cd bark
+git pull
+source .venv/bin/activate
+pip install -r requirements-mac.txt
+./create-app.sh
+```
+
+---
+
+## Windows Setup
+
+### Requirements
+
 - Windows 10/11
 - NVIDIA GPU with CUDA support (tested on RTX 4090)
 - Python 3.11+
 - NVIDIA drivers (CUDA 12.x)
 
-### Mac
-- macOS 13+ (Ventura or later)
-- Apple Silicon (M1/M2/M3/M4)
-- Python 3.11+
-- ffmpeg (`brew install ffmpeg`)
-
-## Setup
-
-### Windows
+### Setup
 
 ```bash
 git clone https://github.com/delarc0/bark.git
@@ -48,30 +125,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 ```
 
-### Mac
-
-```bash
-git clone https://github.com/delarc0/bark.git
-cd bark
-
-brew install ffmpeg
-
-python3 -m venv .venv
-source .venv/bin/activate
-
-pip install -r requirements-mac.txt
-
-# Create the app (one-time)
-chmod +x create-app.sh && ./create-app.sh
-```
-
-**Important:** On first launch, macOS will ask for **Accessibility** permission (for keyboard monitoring) and **Microphone** permission. Grant both in System Settings > Privacy & Security.
-
-On first run, Bark will download the Whisper model (~1.5 GB) and Silero VAD model automatically.
-
-## Usage
-
-### Windows
+### Usage
 
 ```bash
 .venv\Scripts\python dictation.py    # With console
@@ -79,21 +133,23 @@ On first run, Bark will download the Whisper model (~1.5 GB) and Silero VAD mode
 start.bat                            # Double-click launcher
 ```
 
-### Mac
+1. A small green overlay appears at the bottom center of your screen
+2. **Hold Caps Lock** to record (Caps Lock is suppressed, won't toggle)
+3. Speak -- the overlay shows a waveform animation
+4. **Release** to transcribe, or just stop talking (auto-stop after 1.5s of silence)
+5. Transcribed text is pasted at your cursor position
+6. **Right-click** the overlay to quit
 
-Double-click **Bark.app** in Finder, or drag it to your Dock.
+### Updating
 
 ```bash
-# Or from terminal:
-./start.sh
+cd bark
+git pull
+.venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-1. A small overlay appears at the bottom center of your screen
-2. **Hold Caps Lock** (Windows) or **Right Option** (Mac) to record
-3. Speak -- overlay shows waveform animation
-4. **Release** to transcribe (or wait for auto-stop after silence)
-5. Text is pasted at your cursor position
-6. **Right-click** the overlay to quit
+---
 
 ## Configuration
 
