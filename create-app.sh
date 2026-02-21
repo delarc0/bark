@@ -22,6 +22,7 @@ cat > "$APP_DIR/Contents/MacOS/bark" << 'LAUNCHER'
 #!/bin/bash
 DIR="__PROJECT_DIR__"
 LOG="$DIR/dictation.log"
+PYTHON="$DIR/.venv/bin/python3"
 
 # Redirect ALL output (including bash errors) to log
 exec >> "$LOG" 2>&1
@@ -34,15 +35,24 @@ cd "$DIR" || {
     exit 1
 }
 
-if [ ! -d "$DIR/.venv" ]; then
-    osascript -e 'display alert "Bark" message "Virtual environment not found.\n\nRun setup first." as warning'
+if [ ! -f "$PYTHON" ]; then
+    osascript -e 'display alert "Bark" message "Virtual environment not found.\n\nRun: ./setup-mac.sh" as warning'
     exit 1
 fi
 
-source "$DIR/.venv/bin/activate"
-echo "Python: $(which python3) ($(python3 --version 2>&1))"
+# Verify Python version (need 3.11+ for mlx-whisper)
+PYVER=$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>&1)
+PYMINOR=$("$PYTHON" -c 'import sys; print(sys.version_info.minor)' 2>&1)
+echo "Python: $PYTHON ($PYVER)"
+echo "Arch: $(file "$PYTHON" | grep -o 'arm64\|x86_64')"
 
-python3 "$DIR/dictation.py" || {
+if [ "$PYMINOR" -lt 11 ] 2>/dev/null; then
+    echo "ERROR: Python $PYVER is too old (need 3.11+)"
+    osascript -e "display alert \"Bark\" message \"Python $PYVER is too old. Need 3.11+.\n\nDelete .venv and re-run: ./setup-mac.sh\" as critical"
+    exit 1
+fi
+
+"$PYTHON" "$DIR/dictation.py" || {
     LAST_ERR=$(tail -5 "$LOG" 2>/dev/null)
     osascript -e "display alert \"Bark crashed\" message \"$LAST_ERR\" as critical" 2>/dev/null
     exit 1
