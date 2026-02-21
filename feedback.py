@@ -1,9 +1,12 @@
 import logging
 import math
+import os
+import subprocess
+import tempfile
+import wave
 
 import numpy as np
-import sounddevice as sd
-from config import BEEP_VOLUME
+from config import BEEP_VOLUME, IS_MAC
 
 log = logging.getLogger(__name__)
 
@@ -58,25 +61,63 @@ def _generate_chime(volume: float) -> np.ndarray:
     return _make_samples(samples)
 
 
-# Pre-generate at import time
+# Pre-generate tones at import time
 _TONE_START = _generate_blip(600, 900, 35, BEEP_VOLUME * 0.6)
 _TONE_DONE = _generate_chime(BEEP_VOLUME * 0.5)
 
 
-def _play_async(data: np.ndarray):
-    try:
-        sd.play(data, samplerate=SAMPLE_RATE, blocking=False)
-    except Exception as e:
-        log.warning(f"Beep failed: {e}")
+def _save_wav(data: np.ndarray, path: str):
+    """Save float32 numpy array as 16-bit WAV."""
+    pcm = (data * 32767).astype(np.int16)
+    with wave.open(path, "w") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(SAMPLE_RATE)
+        wf.writeframes(pcm.tobytes())
 
 
-def beep_start():
-    _play_async(_TONE_START)
+if IS_MAC:
+    # sounddevice.play() crashes Python 3.14 with GIL errors in PortAudio's
+    # internal audio thread. Use macOS built-in afplay instead.
+    _wav_dir = tempfile.mkdtemp(prefix="bark_beeps_")
+    _WAV_START = os.path.join(_wav_dir, "start.wav")
+    _WAV_DONE = os.path.join(_wav_dir, "done.wav")
+    _save_wav(_TONE_START, _WAV_START)
+    _save_wav(_TONE_DONE, _WAV_DONE)
 
+    def _play_mac(path: str):
+        try:
+            subprocess.Popen(
+                ["afplay", path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            log.warning(f"Beep failed: {e}")
 
-def beep_stop():
-    pass  # No sound on stop - visual indicator is enough
+    def beep_start():
+        _play_mac(_WAV_START)
 
+    def beep_stop():
+        pass
 
-def beep_done():
-    _play_async(_TONE_DONE)
+    def beep_done():
+        _play_mac(_WAV_DONE)
+
+else:
+    import sounddevice as sd
+
+    def _play_async(data: np.ndarray):
+        try:
+            sd.play(data, samplerate=SAMPLE_RATE, blocking=False)
+        except Exception as e:
+            log.warning(f"Beep failed: {e}")
+
+    def beep_start():
+        _play_async(_TONE_START)
+
+    def beep_stop():
+        pass
+
+    def beep_done():
+        _play_async(_TONE_DONE)
