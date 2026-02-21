@@ -111,20 +111,11 @@ class Overlay:
             if os.path.exists(ICON_PATH):
                 self.root.iconbitmap(ICON_PATH)
         else:
-            # Mac: Off-screen root + Toplevel overlay (same as Windows)
-            # MUST NOT withdraw() root -- macOS Aqua Tk won't render Toplevel children
+            # Mac: Single root window as overlay (no Toplevel -- avoids Cocoa rendering bugs)
             self._root = tk.Tk()
-            self._root.title("Bark")
-            self._root.protocol("WM_DELETE_WINDOW", self.quit)
-            self._root.geometry("1x1+-10000+-10000")
-            try:
-                self._root.attributes("-alpha", 0)
-            except tk.TclError:
-                self._root.withdraw()
-            self._root.resizable(False, False)
-
-            self.root = tk.Toplevel(self._root)
+            self.root = self._root
             self.root.title("Bark")
+            self.root.protocol("WM_DELETE_WINDOW", self.quit)
             self.root.overrideredirect(True)
             self.root.attributes("-topmost", True)
             try:
