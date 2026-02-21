@@ -76,7 +76,7 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSUIElement</key>
-    <true/>
+    <false/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Bark needs microphone access for speech-to-text dictation.</string>
     <key>NSAppleEventsUsageDescription</key>

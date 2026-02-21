@@ -111,12 +111,17 @@ class Overlay:
             if os.path.exists(ICON_PATH):
                 self.root.iconbitmap(ICON_PATH)
         else:
-            # Mac: Hidden root + Toplevel overlay (same pattern as Windows)
-            # Using root directly as overlay breaks the Cocoa event loop
+            # Mac: Off-screen root + Toplevel overlay (same as Windows)
+            # MUST NOT withdraw() root -- macOS Aqua Tk won't render Toplevel children
             self._root = tk.Tk()
             self._root.title("Bark")
             self._root.protocol("WM_DELETE_WINDOW", self.quit)
-            self._root.withdraw()  # Hide root (no taskbar on Mac, so withdraw is fine)
+            self._root.geometry("1x1+-10000+-10000")
+            try:
+                self._root.attributes("-alpha", 0)
+            except tk.TclError:
+                self._root.withdraw()
+            self._root.resizable(False, False)
 
             self.root = tk.Toplevel(self._root)
             self.root.title("Bark")
@@ -135,8 +140,10 @@ class Overlay:
         y = screen_h - HEIGHT - 60
         self.root.geometry(f"{WIDTH}x{HEIGHT}+{x}+{y}")
 
-        # Prevent stealing focus
+        # Prevent stealing focus (delay enables it after initial render)
+        self._refocus_enabled = False
         self.root.bind("<FocusIn>", lambda e: self.root.after(1, self._refocus))
+        self._root.after(2000, self._enable_refocus)
 
         # Right-click to quit
         self.root.bind("<Button-3>", self._show_menu)
@@ -235,7 +242,12 @@ class Overlay:
         menu.add_command(label="Quit", command=self.quit)
         menu.tk_popup(event.x_root, event.y_root)
 
+    def _enable_refocus(self):
+        self._refocus_enabled = True
+
     def _refocus(self):
+        if not self._refocus_enabled:
+            return
         try:
             self.root.lower()
             self.root.attributes("-topmost", True)
