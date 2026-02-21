@@ -78,9 +78,36 @@ rm -rf .venv
 "$PYTHON" -m venv .venv
 source .venv/bin/activate
 
-# Verify the venv Python is correct
-VENV_VER=$(python3 --version 2>&1)
-echo "  venv Python: $VENV_VER"
+# Verify the venv Python is correct version and architecture
+VENV_PYTHON="$(pwd)/.venv/bin/python3"
+VENV_VER=$("$VENV_PYTHON" --version 2>&1)
+VENV_MINOR=$("$VENV_PYTHON" -c 'import sys; print(sys.version_info.minor)' 2>&1)
+VENV_ARCH=$(file "$VENV_PYTHON" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+echo "  venv Python: $VENV_VER ($VENV_ARCH)"
+
+if [ "$VENV_MINOR" -lt 11 ] 2>/dev/null; then
+    echo ""
+    echo "ERROR: venv created with Python $VENV_VER (need 3.11+)"
+    echo "  This usually means the wrong Python was used."
+    echo "  Delete .venv and install Homebrew Python:"
+    echo "    rm -rf .venv"
+    echo "    brew install python@3.12"
+    echo "    ./setup-mac.sh"
+    echo ""
+    exit 1
+fi
+
+if [ "$(uname -m)" = "arm64" ] && [ "$VENV_ARCH" = "x86_64" ]; then
+    echo ""
+    echo "ERROR: venv Python is x86_64 on arm64 Mac."
+    echo "  This will crash when loading arm64 wheels."
+    echo "  Delete .venv and use Homebrew Python:"
+    echo "    rm -rf .venv"
+    echo "    brew install python@3.12"
+    echo "    ./setup-mac.sh"
+    echo ""
+    exit 1
+fi
 
 # ── Step 5: Install dependencies ──────────────────────────────────
 echo "[5/6] Installing dependencies (this may take a few minutes)..."
