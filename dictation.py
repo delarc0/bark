@@ -147,8 +147,10 @@ def main():
     def init_backend():
         try:
             ui.set_state("loading")
+            ui.set_sublabel("MICROPHONE")
             ctx["recorder"] = AudioRecorder()
             ui.set_recorder(ctx["recorder"])
+            ui.set_sublabel("WHISPER AI")
             ctx["transcriber"] = Transcriber()
             # Schedule keyboard hook on main thread (macOS Quartz event tap
             # must be added to the main thread's CFRunLoop)
