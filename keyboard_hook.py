@@ -148,7 +148,8 @@ class KeyboardHook:
             except Exception:
                 pass
 
-    def start(self):
+    def start(self) -> bool:
+        """Start keyboard monitoring. Returns True on success, False on failure."""
         if IS_WIN:
             self._listener = keyboard.Listener(
                 on_press=lambda key: None,
@@ -179,7 +180,7 @@ class KeyboardHook:
                     "Failed to create event tap - Accessibility permission not granted. "
                     "Open System Settings > Privacy & Security > Accessibility and add Bark."
                 )
-                return
+                return False
 
             self._tap_source = CFMachPortCreateRunLoopSource(None, self._tap, 0)
             CFRunLoopAddSource(
@@ -189,6 +190,7 @@ class KeyboardHook:
             log.info("Quartz event tap active (Right Option key).")
 
         log.info("Keyboard listener started.")
+        return True
 
     def stop(self):
         if self._listener:

@@ -32,41 +32,51 @@ AMBER_DIM = "#665800"
 
 # Text/indicator color per state
 STATE_COLORS = {
+    "loading": BLACK,
     "idle": BLACK,
     "recording": BLACK,
     "transcribing": BLACK,
     "done": BLACK,
+    "error": BLACK,
 }
 
 # Outer diffuse glow layer
 STATE_GLOW = {
+    "loading": AMBER_DIM,
     "idle": GREEN_DIM,
     "recording": GREEN,
     "transcribing": AMBER_DIM,
     "done": GREEN,
+    "error": RED_DIM,
 }
 
 # Bright inner edge
 STATE_EDGE = {
+    "loading": AMBER,
     "idle": GREEN_GLOW,
     "recording": GREEN_BRIGHT,
     "transcribing": AMBER,
     "done": GREEN_BRIGHT,
+    "error": RED,
 }
 
 # Indicator square color (separate from text)
 STATE_INDICATOR = {
+    "loading": AMBER,
     "idle": GREEN_DARK,
     "recording": RED,
     "transcribing": AMBER,
     "done": GREEN_DARK,
+    "error": RED,
 }
 
 LABELS = {
+    "loading": "LOADING",
     "idle": "STANDBY",
     "recording": "REC",
     "transcribing": "PROCESSING",
     "done": "TRANSMITTED",
+    "error": "ERROR",
 }
 
 WIDTH = 280
@@ -138,10 +148,12 @@ class Overlay:
         self.root.lift()
         self.root.update_idletasks()
 
-        # Prevent stealing focus (delay enables it after initial render)
+        # Prevent stealing focus (Windows only - Mac overlay doesn't need this
+        # and the lower/re-topmost cycling causes System Settings to disappear)
         self._refocus_enabled = False
-        self.root.bind("<FocusIn>", lambda e: self.root.after(1, self._refocus))
-        self._root.after(2000, self._enable_refocus)
+        if IS_WIN:
+            self.root.bind("<FocusIn>", lambda e: self.root.after(1, self._refocus))
+            self._root.after(2000, self._enable_refocus)
 
         # Right-click to quit
         self.root.bind("<Button-3>", self._show_menu)
@@ -322,14 +334,17 @@ class Overlay:
         self.canvas.itemconfig(self._status_text, text=text, fill=color)
 
         # Sublabel changes with state
-        if state == "idle":
-            self.canvas.itemconfig(self._label, text="DICTATION", fill=GREEN_DARK)
-        elif state == "recording":
-            self.canvas.itemconfig(self._label, text="LISTENING", fill=GREEN_DARK)
-        elif state == "transcribing":
-            self.canvas.itemconfig(self._label, text="WHISPER AI", fill=GREEN_DARK)
-        elif state == "done":
-            self.canvas.itemconfig(self._label, text="COMPLETE", fill=GREEN_DARK)
+        sublabels = {
+            "loading": "INITIALIZING",
+            "idle": "DICTATION",
+            "recording": "LISTENING",
+            "transcribing": "WHISPER AI",
+            "done": "COMPLETE",
+            "error": "CHECK LOG",
+        }
+        self.canvas.itemconfig(
+            self._label, text=sublabels.get(state, ""), fill=GREEN_DARK
+        )
 
         if state == "recording":
             self._pulse_on = True
