@@ -14,20 +14,20 @@ echo ""
 
 # ── Step 1: Homebrew ──────────────────────────────────────────────
 if ! command -v brew &>/dev/null; then
-    echo "[1/6] Installing Homebrew..."
+    echo "[1/7] Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     # Add Homebrew to PATH for this session
     eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)"
 else
-    echo "[1/6] Homebrew found."
+    echo "[1/7] Homebrew found."
 fi
 
 # ── Step 2: System dependencies ───────────────────────────────────
-echo "[2/6] Installing Python and ffmpeg..."
+echo "[2/7] Installing Python and ffmpeg..."
 brew install python ffmpeg 2>/dev/null || brew upgrade python ffmpeg 2>/dev/null || true
 
 # ── Step 3: Find the right Python (arm64, 3.11+) ─────────────────
-echo "[3/6] Finding Python 3.11+..."
+echo "[3/7] Finding Python 3.11+..."
 PYTHON=""
 BREW_PREFIX="$(brew --prefix)"
 
@@ -79,7 +79,7 @@ echo "  Installing $TK_FORMULA (tkinter)..."
 brew install "$TK_FORMULA" 2>/dev/null || brew install python-tk 2>/dev/null || true
 
 # ── Step 4: Create virtual environment ────────────────────────────
-echo "[4/6] Creating virtual environment..."
+echo "[4/7] Creating virtual environment..."
 rm -rf .venv
 "$PYTHON" -m venv .venv
 source .venv/bin/activate
@@ -116,23 +116,39 @@ if [ "$(uname -m)" = "arm64" ] && [ "$VENV_ARCH" = "x86_64" ]; then
 fi
 
 # ── Step 5: Install dependencies ──────────────────────────────────
-echo "[5/6] Installing dependencies (this may take a few minutes)..."
+echo "[5/7] Installing dependencies (this may take a few minutes)..."
 pip install --upgrade pip --quiet
 pip install -r requirements-mac.txt --quiet
 
 echo "  Dependencies installed."
 
 # ── Step 6: Build Bark.app ────────────────────────────────────────
-echo "[6/6] Building Bark.app..."
+echo "[6/7] Building Bark.app..."
 chmod +x create-app.sh
 ./create-app.sh
+
+# ── Step 7: Add to Applications ──────────────────────────────────
+echo "[7/7] Adding to Applications..."
+BARK_APP="$(pwd)/Bark.app"
+if [ -d "$BARK_APP" ]; then
+    # Remove existing symlink or app
+    if [ -L "/Applications/Bark.app" ]; then
+        rm -f "/Applications/Bark.app"
+    elif [ -d "/Applications/Bark.app" ]; then
+        rm -rf "/Applications/Bark.app"
+    fi
+    # Symlink to /Applications (shows in Spotlight + Launchpad)
+    ln -s "$BARK_APP" "/Applications/Bark.app" 2>/dev/null && \
+        echo "  Bark.app added to /Applications" || \
+        echo "  Could not symlink to /Applications (launch from $(pwd)/Bark.app instead)"
+fi
 
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
 echo "  ║   Setup complete!                        ║"
 echo "  ║                                          ║"
-echo "  ║   Double-click Bark.app to launch.       ║"
-echo "  ║   Or drag it to your Dock.               ║"
+echo "  ║   Bark.app is in your Applications.      ║"
+echo "  ║   Double-click it, or drag to Dock.      ║"
 echo "  ║                                          ║"
 echo "  ║   First launch:                          ║"
 echo "  ║   - Grant Microphone permission          ║"
