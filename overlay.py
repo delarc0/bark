@@ -1,3 +1,4 @@
+import ctypes
 import logging
 import os
 import random
@@ -5,10 +6,18 @@ import tkinter as tk
 
 log = logging.getLogger(__name__)
 
+# Register as a proper Windows app so the taskbar icon is pinnable
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("lab37.bark")
+except Exception:
+    pass
+
 # LAB37 design system
 GREEN = "#42FC93"
+GREEN_BRIGHT = "#7AFDB5"
 GREEN_DIM = "#1a6b3d"
 GREEN_GLOW = "#2aad62"
+GREEN_DARK = "#0d3520"
 BLACK = "#000000"
 SURFACE = "#111113"
 BORDER = "#27272A"
@@ -19,18 +28,36 @@ RED_DIM = "#661111"
 AMBER = "#FFD700"
 AMBER_DIM = "#665800"
 
+# Text/indicator color per state
 STATE_COLORS = {
-    "idle": TEXT_DIM,
-    "recording": RED,
-    "transcribing": AMBER,
+    "idle": BLACK,
+    "recording": BLACK,
+    "transcribing": BLACK,
+    "done": BLACK,
+}
+
+# Outer diffuse glow layer
+STATE_GLOW = {
+    "idle": GREEN_DIM,
+    "recording": GREEN,
+    "transcribing": AMBER_DIM,
     "done": GREEN,
 }
 
-STATE_BORDERS = {
-    "idle": BORDER,
+# Bright inner edge
+STATE_EDGE = {
+    "idle": GREEN_GLOW,
+    "recording": GREEN_BRIGHT,
+    "transcribing": AMBER,
+    "done": GREEN_BRIGHT,
+}
+
+# Indicator square color (separate from text)
+STATE_INDICATOR = {
+    "idle": GREEN_DARK,
     "recording": RED,
     "transcribing": AMBER,
-    "done": GREEN,
+    "done": GREEN_DARK,
 }
 
 LABELS = {
@@ -41,15 +68,15 @@ LABELS = {
 }
 
 WIDTH = 280
-HEIGHT = 52
+HEIGHT = 64
 
 # Waveform config
 NUM_BARS = 20
 BAR_WIDTH = 3
 BAR_GAP = 3
 BAR_START_X = 152
-BAR_Y_CENTER = 24
-BAR_MAX_H = 14
+BAR_Y_CENTER = 31
+BAR_MAX_H = 20
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 ICON_PATH = os.path.join(_dir, "icon.ico")
@@ -59,16 +86,20 @@ class Overlay:
     def __init__(self, on_quit=None):
         self._on_quit = on_quit
 
-        # Hidden root window provides the taskbar icon
+        # Root window lives in the taskbar (NOT withdrawn - withdraw hides from taskbar)
         self._root = tk.Tk()
-        self._root.withdraw()
-        self._root.title("LAB37 Dictation")
+        self._root.title("Bark")
         if os.path.exists(ICON_PATH):
             self._root.iconbitmap(ICON_PATH)
+        self._root.protocol("WM_DELETE_WINDOW", self.quit)
+        # Invisible but present in taskbar: off-screen + fully transparent
+        self._root.geometry("1x1+-10000+-10000")
+        self._root.attributes("-alpha", 0)
+        self._root.resizable(False, False)
 
-        # Visible overlay is a Toplevel child
+        # Visible overlay is a borderless Toplevel child
         self.root = tk.Toplevel(self._root)
-        self.root.title("LAB37 Dictation")
+        self.root.title("Bark")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.92)
@@ -89,49 +120,53 @@ class Overlay:
         # Right-click to quit
         self.root.bind("<Button-3>", self._show_menu)
 
-        # Outer glow frame (border changes color with state)
-        self._glow_frame = tk.Frame(self.root, bg=BORDER)
-        self._glow_frame.pack(fill="both", expand=True, padx=0, pady=0)
+        # Outer diffuse glow layer
+        self._glow_outer = tk.Frame(self.root, bg=GREEN_DIM)
+        self._glow_outer.pack(fill="both", expand=True, padx=0, pady=0)
 
-        # Inner black surface
-        inner = tk.Frame(self._glow_frame, bg=BLACK)
+        # Bright inner edge
+        self._glow_edge = tk.Frame(self._glow_outer, bg=GREEN_GLOW)
+        self._glow_edge.pack(fill="both", expand=True, padx=1, pady=1)
+
+        # Green button surface
+        inner = tk.Frame(self._glow_edge, bg=GREEN)
         inner.pack(fill="both", expand=True, padx=1, pady=1)
 
-        # Main canvas for custom rendering
+        # Main canvas - green surface like a CTA button
         self.canvas = tk.Canvas(
-            inner, bg=BLACK, highlightthickness=0,
-            width=WIDTH - 2, height=HEIGHT - 2,
+            inner, bg=GREEN, highlightthickness=0,
+            width=WIDTH - 4, height=HEIGHT - 4,
         )
         self.canvas.pack(fill="both", expand=True)
 
-        # Scanlines (subtle CRT effect)
+        # Scanlines (subtle CRT effect - dark on green)
         for y_line in range(0, HEIGHT, 4):
             self.canvas.create_line(
                 0, y_line, WIDTH, y_line,
-                fill="#ffffff", stipple="gray12",
+                fill=BLACK, stipple="gray12",
             )
 
-        # Status indicator (square, not circle - LAB37 has no rounded corners)
+        # Status indicator square
         self._indicator = self.canvas.create_rectangle(
-            14, 16, 26, 28,
-            fill=TEXT_DIM, outline="",
+            14, 18, 26, 30,
+            fill=GREEN_DARK, outline="",
         )
 
-        # Status text
+        # Status text - black on green like website CTA buttons
         self._status_text = self.canvas.create_text(
-            40, 15,
+            40, 16,
             text="STANDBY",
             font=("Consolas", 13, "bold"),
-            fill=TEXT_DIM,
+            fill=BLACK,
             anchor="nw",
         )
 
         # Small sublabel
         self._label = self.canvas.create_text(
-            40, 35,
+            40, 39,
             text="DICTATION",
             font=("Consolas", 7),
-            fill=TEXT_DIM,
+            fill=GREEN_DARK,
             anchor="nw",
         )
 
@@ -139,16 +174,16 @@ class Overlay:
         bar_end_x = BAR_START_X + NUM_BARS * (BAR_WIDTH + BAR_GAP)
         self.canvas.create_line(
             BAR_START_X, BAR_Y_CENTER, bar_end_x, BAR_Y_CENTER,
-            fill=GREEN_DIM, dash=(2, 4),
+            fill=GREEN_GLOW, dash=(2, 4),
         )
 
-        # Waveform bars
+        # Waveform bars - black on green
         self._bars = []
         for i in range(NUM_BARS):
             x = BAR_START_X + i * (BAR_WIDTH + BAR_GAP)
             bar = self.canvas.create_rectangle(
                 x, BAR_Y_CENTER, x + BAR_WIDTH, BAR_Y_CENTER,
-                fill=GREEN, outline="", state="hidden",
+                fill=BLACK, outline="", state="hidden",
             )
             self._bars.append(bar)
         self._bar_heights = [0.0] * NUM_BARS
@@ -162,8 +197,8 @@ class Overlay:
     def _show_menu(self, event):
         menu = tk.Menu(
             self.root, tearoff=0,
-            bg=SURFACE, fg=TEXT_MED,
-            activebackground=GREEN_DIM, activeforeground=GREEN,
+            bg=GREEN, fg=BLACK,
+            activebackground=GREEN_BRIGHT, activeforeground=BLACK,
             font=("Consolas", 9),
             borderwidth=1,
             relief="solid",
@@ -216,12 +251,8 @@ class Overlay:
             x = BAR_START_X + i * (BAR_WIDTH + BAR_GAP)
             self.canvas.coords(bar, x, BAR_Y_CENTER - pixel_h,
                                x + BAR_WIDTH, BAR_Y_CENTER + pixel_h)
-            if h > 0.5:
-                self.canvas.itemconfig(bar, fill=GREEN)
-            elif h > 0.2:
-                self.canvas.itemconfig(bar, fill=GREEN_GLOW)
-            else:
-                self.canvas.itemconfig(bar, fill=GREEN_DIM)
+            # All bars black on green bg
+            self.canvas.itemconfig(bar, fill=BLACK)
 
         self._wave_job = self._root.after(60, self._update_wave)
 
@@ -233,30 +264,33 @@ class Overlay:
 
     def _update_state(self, state: str):
         self._state = state
-        color = STATE_COLORS.get(state, TEXT_DIM)
-        border_color = STATE_BORDERS.get(state, BORDER)
+        color = STATE_COLORS.get(state, BLACK)
+        indicator = STATE_INDICATOR.get(state, GREEN_DARK)
+        glow = STATE_GLOW.get(state, GREEN_DIM)
+        edge = STATE_EDGE.get(state, GREEN_GLOW)
         text = LABELS.get(state, "STANDBY")
 
         if self._pulse_job:
             self._root.after_cancel(self._pulse_job)
             self._pulse_job = None
 
-        # Update border glow
-        self._glow_frame.configure(bg=border_color)
+        # Update border glow layers
+        self._glow_outer.configure(bg=glow)
+        self._glow_edge.configure(bg=edge)
 
         # Update indicator and text
-        self.canvas.itemconfig(self._indicator, fill=color)
+        self.canvas.itemconfig(self._indicator, fill=indicator)
         self.canvas.itemconfig(self._status_text, text=text, fill=color)
 
         # Sublabel changes with state
         if state == "idle":
-            self.canvas.itemconfig(self._label, text="DICTATION", fill=TEXT_DIM)
+            self.canvas.itemconfig(self._label, text="DICTATION", fill=GREEN_DARK)
         elif state == "recording":
-            self.canvas.itemconfig(self._label, text="LISTENING", fill=RED_DIM)
+            self.canvas.itemconfig(self._label, text="LISTENING", fill=GREEN_DARK)
         elif state == "transcribing":
-            self.canvas.itemconfig(self._label, text="WHISPER AI", fill=AMBER_DIM)
+            self.canvas.itemconfig(self._label, text="WHISPER AI", fill=GREEN_DARK)
         elif state == "done":
-            self.canvas.itemconfig(self._label, text="COMPLETE", fill=GREEN_DIM)
+            self.canvas.itemconfig(self._label, text="COMPLETE", fill=GREEN_DARK)
 
         if state == "recording":
             self._pulse_on = True
@@ -273,11 +307,15 @@ class Overlay:
             return
         self._pulse_on = not self._pulse_on
         if self._pulse_on:
+            # Intense glow - outer halo + bright edge
+            self._glow_outer.configure(bg=GREEN)
+            self._glow_edge.configure(bg=GREEN_BRIGHT)
             self.canvas.itemconfig(self._indicator, fill=RED)
-            self._glow_frame.configure(bg=RED)
         else:
+            # Subtle dip
+            self._glow_outer.configure(bg=GREEN_GLOW)
+            self._glow_edge.configure(bg=GREEN)
             self.canvas.itemconfig(self._indicator, fill=RED_DIM)
-            self._glow_frame.configure(bg=RED_DIM)
         self._pulse_job = self._root.after(500, self._pulse)
 
     def run(self):
