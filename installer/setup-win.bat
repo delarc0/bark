@@ -10,8 +10,12 @@ echo.
 
 :: ── Step 1: Check NVIDIA GPU ──────────────────────────────────────
 echo [1/5] Checking NVIDIA GPU...
-nvidia-smi >nul 2>&1
-if errorlevel 1 (
+set GPU_OK=0
+for /f "tokens=*" %%g in ('nvidia-smi --query-gpu=name --format^=csv^,noheader 2^>nul') do (
+    echo   Found: %%g
+    set GPU_OK=1
+)
+if "!GPU_OK!"=="0" (
     echo.
     echo   ERROR: NVIDIA GPU not detected.
     echo   Bark requires an NVIDIA GPU with CUDA support.
@@ -20,9 +24,6 @@ if errorlevel 1 (
     echo.
     pause
     exit /b 1
-)
-for /f "tokens=*" %%g in ('nvidia-smi --query-gpu=name --format^=csv^,noheader 2^>nul') do (
-    echo   Found: %%g
 )
 echo.
 
