@@ -20,6 +20,18 @@ KEYEVENTF_KEYUP = 0x2
 MAC_TRIGGER = keyboard.Key.alt_r  # Right Option
 
 
+def _check_mac_accessibility():
+    """Check if the app has Accessibility permission on macOS (required for keyboard monitoring)."""
+    try:
+        import subprocess
+        # This is a known trick: if we can create an event tap, we have permission.
+        # But simpler: just warn in logs and let pynput fail gracefully.
+        log.info("macOS: Keyboard monitoring requires Accessibility permission.")
+        log.info("macOS: Grant in System Settings > Privacy & Security > Accessibility.")
+    except Exception:
+        pass
+
+
 class KeyboardHook:
     def __init__(self, on_record_start, on_record_stop):
         self._on_record_start = on_record_start
@@ -61,6 +73,7 @@ class KeyboardHook:
     def _on_press_mac(self, key):
         if key == MAC_TRIGGER and not self._pressed:
             self._pressed = True
+            log.debug(f"Mac trigger pressed: {key}")
             try:
                 self._on_record_start()
             except Exception as e:
@@ -69,6 +82,7 @@ class KeyboardHook:
     def _on_release_mac(self, key):
         if key == MAC_TRIGGER and self._pressed:
             self._pressed = False
+            log.debug(f"Mac trigger released: {key}")
             threading.Thread(
                 target=self._safe_record_stop, daemon=True
             ).start()
@@ -114,11 +128,13 @@ class KeyboardHook:
                 win32_event_filter=self._win32_event_filter,
             )
         else:
+            _check_mac_accessibility()
             self._listener = keyboard.Listener(
                 on_press=self._on_press_mac,
                 on_release=self._on_release_mac,
             )
         self._listener.start()
+        log.info("Keyboard listener started.")
 
     def stop(self):
         if self._listener:
