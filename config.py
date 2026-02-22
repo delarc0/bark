@@ -32,6 +32,7 @@ DEFAULT_CONFIG = {
     "clipboard_mode": False,
     # Overlay
     "dark_mode": False,
+    "show_overlay": not IS_MAC,  # Mac: tray-only by default; Windows: overlay
     "overlay_x": None,
     "overlay_y": None,
     "idle_timeout": 8,          # seconds before pill fades out (0 = never)

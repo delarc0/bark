@@ -197,7 +197,9 @@ class SystemTray:
         _mac_callbacks.clear()
 
         # Register callbacks
-        _mac_callbacks[_TAG_OVERLAY] = self._toggle_overlay_from_menu
+        _mac_callbacks[_TAG_OVERLAY] = lambda: self._overlay._root.after(
+            0, self._overlay._toggle_show_overlay
+        )
         _mac_callbacks[_TAG_SOUND] = self._toggle_sound
         _mac_callbacks[_TAG_DARK] = lambda: self._overlay._root.after(
             0, self._overlay._toggle_dark_mode
@@ -210,8 +212,8 @@ class SystemTray:
         _mac_callbacks[_TAG_HISTORY] = self._open_history
         _mac_callbacks[_TAG_QUIT] = self._quit
 
-        # Show/Hide Overlay
-        self._add_item(menu, "Show Overlay" if not self._overlay._visible else "Hide Overlay", _TAG_OVERLAY)
+        # Show Overlay toggle
+        self._add_item(menu, "Show Overlay", _TAG_OVERLAY, checked=cfg["show_overlay"])
 
         menu.addItem_(NSMenuItem.separatorItem())
 
@@ -288,15 +290,6 @@ class SystemTray:
     def _refresh_mac_menu(self):
         """Called by delegate when menu is about to open. Rebuild for fresh state."""
         self._build_mac_menu()
-
-    def _toggle_overlay_from_menu(self):
-        try:
-            if self._overlay._visible:
-                self._overlay._root.after(0, self._overlay._hide_overlay)
-            else:
-                self._overlay._root.after(0, self._overlay.show_overlay)
-        except Exception:
-            pass
 
     # ================================================================ Windows pystray
 
