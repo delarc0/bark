@@ -2,6 +2,7 @@ mlx-whisper>=0.4.0
 sounddevice>=0.4.6
 pynput>=1.7.6
 pyobjc-framework-Quartz>=9.0
+pyobjc-framework-Cocoa>=9.0
 numpy>=1.24.0
 pyperclip>=1.8.2
 pystray>=0.19.5
