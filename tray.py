@@ -33,6 +33,8 @@ LANGUAGES_OTHER = [
     ("ar", "Arabic"),
 ]
 
+ALL_LANGUAGES = LANGUAGES_TOP + LANGUAGES_OTHER
+
 # Trigger key options per platform
 TRIGGER_KEYS_WIN = [
     ("capslock", "Caps Lock"),
@@ -47,24 +49,258 @@ TRIGGER_KEYS_MAC = [
 ]
 
 
+# --- macOS menu bar via PyObjC ---
+_APPKIT_OK = False
+_mac_callbacks = {}  # tag -> callable
+_tray_ref = None  # module-level ref for ObjC delegate
+
+if IS_MAC:
+    try:
+        import objc
+        from AppKit import (
+            NSStatusBar,
+            NSMenu,
+            NSMenuItem,
+            NSVariableStatusItemLength,
+            NSFont,
+            NSAttributedString,
+            NSColor,
+            NSOnState,
+            NSOffState,
+            NSForegroundColorAttributeName,
+            NSFontAttributeName,
+        )
+        from Foundation import NSObject as _NSObj
+
+        class _MenuTarget(_NSObj):
+            """Receives NSMenuItem actions and dispatches to Python callbacks."""
+
+            def menuAction_(self, sender):
+                cb = _mac_callbacks.get(sender.tag())
+                if cb:
+                    try:
+                        cb()
+                    except Exception as e:
+                        log.error(f"Menu action error: {e}")
+
+        class _MenuDelegate(_NSObj):
+            """Refreshes toggle states when the menu opens."""
+
+            def menuNeedsUpdate_(self, menu):
+                if _tray_ref:
+                    try:
+                        _tray_ref._refresh_mac_menu()
+                    except Exception as e:
+                        log.error(f"Menu refresh error: {e}")
+
+        _APPKIT_OK = True
+    except ImportError as e:
+        log.info(f"AppKit not available for menu bar: {e}")
+
+
+# --- Tag constants for Mac menu items ---
+_TAG_OVERLAY = 1
+_TAG_SOUND = 2
+_TAG_DARK = 3
+_TAG_CLIP = 4
+_TAG_STREAM = 5
+_TAG_STARTUP = 6
+_TAG_HISTORY = 7
+_TAG_QUIT = 8
+_TAG_LANG = 100    # 100 + index into ALL_LANGUAGES
+_TAG_TRIGGER = 200  # 200 + index into TRIGGER_KEYS_MAC
+
+
 class SystemTray:
     def __init__(self, overlay, on_quit=None):
         self._overlay = overlay
         self._on_quit = on_quit
-        self._icon = None
+        self._icon = None  # pystray Icon (Windows)
+        self._status_item = None  # NSStatusItem (Mac)
+        self._mac_menu = None
+        self._mac_target = None
+        self._mac_delegate = None
+        self._state = "loading"
 
     def start(self):
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def _run(self):
-        # macOS: pystray uses AppKit/NSApplication which must run on the main
-        # thread. Running it from a daemon thread causes a Cocoa-level crash
-        # (SIGABRT) that kills the entire process before any UI appears.
-        # The overlay right-click menu provides all settings on Mac.
         if IS_MAC:
-            log.info("System tray skipped on macOS (use overlay right-click menu).")
+            if _APPKIT_OK:
+                # NSStatusItem must be created on the main thread (AppKit requirement)
+                self._overlay._root.after(100, self._setup_mac_tray)
+            else:
+                log.info("Mac menu bar skipped (AppKit not available).")
+        else:
+            threading.Thread(target=self._run, daemon=True).start()
+
+    def set_state(self, state):
+        """Update menu bar icon to reflect app state."""
+        self._state = state
+        if IS_MAC and self._status_item:
+            try:
+                self._overlay._root.after(0, self._update_mac_icon)
+            except Exception:
+                pass
+
+    # ================================================================ macOS NSStatusItem
+
+    def _setup_mac_tray(self):
+        global _tray_ref
+        _tray_ref = self
+
+        try:
+            sb = NSStatusBar.systemStatusBar()
+            self._status_item = sb.statusItemWithLength_(NSVariableStatusItemLength)
+
+            self._mac_target = _MenuTarget.alloc().init()
+            self._mac_delegate = _MenuDelegate.alloc().init()
+
+            self._mac_menu = NSMenu.alloc().init()
+            self._mac_menu.setAutoenablesItems_(False)
+            self._mac_menu.setDelegate_(self._mac_delegate)
+
+            self._build_mac_menu()
+            self._status_item.setMenu_(self._mac_menu)
+            self._update_mac_icon()
+
+            log.info("Mac menu bar icon ready.")
+        except Exception as e:
+            log.error(f"Failed to create menu bar icon: {e}", exc_info=True)
+
+    def _update_mac_icon(self):
+        """Set the menu bar dot color based on current state."""
+        if not self._status_item:
             return
 
+        colors = {
+            "idle": NSColor.systemGreenColor(),
+            "loading": NSColor.systemOrangeColor(),
+            "recording": NSColor.systemRedColor(),
+            "transcribing": NSColor.systemYellowColor(),
+            "done": NSColor.systemGreenColor(),
+            "error": NSColor.systemRedColor(),
+        }
+        color = colors.get(self._state, NSColor.systemGreenColor())
+
+        attrs = {
+            NSForegroundColorAttributeName: color,
+            NSFontAttributeName: NSFont.systemFontOfSize_(12),
+        }
+        title = NSAttributedString.alloc().initWithString_attributes_(
+            "\u25CF", attrs  # ● solid circle
+        )
+        self._status_item.button().setAttributedTitle_(title)
+
+    def _build_mac_menu(self):
+        """Build the full menu. Called once at setup and rebuilt on refresh."""
+        menu = self._mac_menu
+        menu.removeAllItems()
+        _mac_callbacks.clear()
+
+        # Register callbacks
+        _mac_callbacks[_TAG_OVERLAY] = self._toggle_overlay_from_menu
+        _mac_callbacks[_TAG_SOUND] = self._toggle_sound
+        _mac_callbacks[_TAG_DARK] = lambda: self._overlay._root.after(
+            0, self._overlay._toggle_dark_mode
+        )
+        _mac_callbacks[_TAG_CLIP] = lambda: self._overlay._root.after(
+            0, self._overlay._toggle_clipboard_mode
+        )
+        _mac_callbacks[_TAG_STREAM] = self._toggle_streaming
+        _mac_callbacks[_TAG_STARTUP] = self._toggle_startup
+        _mac_callbacks[_TAG_HISTORY] = self._open_history
+        _mac_callbacks[_TAG_QUIT] = self._quit
+
+        # Show/Hide Overlay
+        self._add_item(menu, "Show Overlay" if not self._overlay._visible else "Hide Overlay", _TAG_OVERLAY)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        # Toggles
+        self._add_item(menu, "Sound", _TAG_SOUND, checked=cfg["sound_enabled"])
+        self._add_item(menu, "Dark Mode", _TAG_DARK, checked=cfg["dark_mode"])
+        clip_label = "Mode: Clipboard" if cfg["clipboard_mode"] else "Mode: Type"
+        self._add_item(menu, clip_label, _TAG_CLIP)
+        self._add_item(menu, "Streaming Preview", _TAG_STREAM, checked=cfg["streaming_preview"])
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        # Language submenu
+        lang_menu = NSMenu.alloc().init()
+        lang_menu.setAutoenablesItems_(False)
+        for i, (code, name) in enumerate(ALL_LANGUAGES):
+            tag = _TAG_LANG + i
+            _mac_callbacks[tag] = self._make_language_handler(code)
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                name, "menuAction:", ""
+            )
+            item.setTarget_(self._mac_target)
+            item.setTag_(tag)
+            if cfg["language"] == code:
+                item.setState_(NSOnState)
+            lang_menu.addItem_(item)
+
+        lang_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Language", None, ""
+        )
+        lang_item.setSubmenu_(lang_menu)
+        menu.addItem_(lang_item)
+
+        # Trigger key submenu
+        trigger_menu = NSMenu.alloc().init()
+        trigger_menu.setAutoenablesItems_(False)
+        for i, (code, name) in enumerate(TRIGGER_KEYS_MAC):
+            tag = _TAG_TRIGGER + i
+            _mac_callbacks[tag] = self._make_trigger_handler(code, "trigger_key_mac")
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                name, "menuAction:", ""
+            )
+            item.setTarget_(self._mac_target)
+            item.setTag_(tag)
+            if cfg["trigger_key_mac"] == code:
+                item.setState_(NSOnState)
+            trigger_menu.addItem_(item)
+
+        trigger_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Trigger Key", None, ""
+        )
+        trigger_item.setSubmenu_(trigger_menu)
+        menu.addItem_(trigger_item)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        self._add_item(menu, "Start on Login", _TAG_STARTUP, checked=cfg["start_on_login"])
+        self._add_item(menu, "History", _TAG_HISTORY)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        self._add_item(menu, "Quit", _TAG_QUIT)
+
+    def _add_item(self, menu, title, tag, checked=None):
+        item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            title, "menuAction:", ""
+        )
+        item.setTarget_(self._mac_target)
+        item.setTag_(tag)
+        if checked is not None:
+            item.setState_(NSOnState if checked else NSOffState)
+        menu.addItem_(item)
+
+    def _refresh_mac_menu(self):
+        """Called by delegate when menu is about to open. Rebuild for fresh state."""
+        self._build_mac_menu()
+
+    def _toggle_overlay_from_menu(self):
+        try:
+            if self._overlay._visible:
+                self._overlay._root.after(0, self._overlay._hide_overlay)
+            else:
+                self._overlay._root.after(0, self._overlay.show_overlay)
+        except Exception:
+            pass
+
+    # ================================================================ Windows pystray
+
+    def _run(self):
         try:
             import pystray
             from PIL import Image
@@ -166,7 +402,7 @@ class SystemTray:
         log.info("System tray started.")
         self._icon.run()
 
-    # --- Menu handlers ---
+    # ================================================================ Menu handlers (shared)
 
     def _toggle_overlay(self):
         try:
@@ -181,7 +417,6 @@ class SystemTray:
             self._overlay.show_overlay()
 
     def _toggle_clipboard(self):
-        # Delegate to overlay (handles config + UI update on main thread)
         try:
             self._overlay._root.after(0, self._overlay._toggle_clipboard_mode)
         except Exception:
@@ -192,7 +427,6 @@ class SystemTray:
         save_config()
 
     def _toggle_dark_mode(self):
-        # Delegate to overlay (handles config + theme update on main thread)
         try:
             self._overlay._root.after(0, self._overlay._toggle_dark_mode)
         except Exception:
@@ -239,11 +473,22 @@ class SystemTray:
                 pass
         if self._icon:
             self._icon.stop()
+        if IS_MAC:
+            try:
+                self._overlay._root.after(0, self._overlay.quit)
+            except Exception:
+                pass
 
     def stop(self):
         if self._icon:
             try:
                 self._icon.stop()
+            except Exception:
+                pass
+        if IS_MAC and self._status_item:
+            try:
+                NSStatusBar.systemStatusBar().removeStatusItem_(self._status_item)
+                self._status_item = None
             except Exception:
                 pass
 

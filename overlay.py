@@ -589,6 +589,10 @@ class Overlay:
 
     # ============================================================ public API
 
+    def set_tray(self, tray):
+        """Connect tray so state changes update the menu bar icon."""
+        self._tray_ref = tray
+
     def set_state(self, state: str):
         try:
             self._root.after(0, self._update_state, state)
@@ -597,6 +601,9 @@ class Overlay:
 
     def _update_state(self, state: str):
         self._state = state
+        # Notify tray for menu bar icon update
+        if hasattr(self, "_tray_ref") and self._tray_ref:
+            self._tray_ref.set_state(state)
         if state == "recording":
             self.show_overlay()
         if state in ("idle", "done"):
