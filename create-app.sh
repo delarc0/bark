@@ -24,19 +24,32 @@ DIR="__PROJECT_DIR__"
 LOG="$DIR/dictation.log"
 PYTHON="$DIR/.venv/bin/python3"
 
-# Redirect ALL output (including bash errors) to log
+# Show error dialog (works even before log redirect)
+show_error() {
+    osascript -e "display alert \"Bark\" message \"$1\" as critical" 2>/dev/null
+}
+
+# Validate project dir BEFORE redirecting (if DIR is wrong, redirect fails silently)
+if [ ! -d "$DIR" ]; then
+    show_error "Project folder not found:\n$DIR\n\nRebuild with: ./create-app.sh"
+    exit 1
+fi
+
+# Now safe to redirect to log
 exec >> "$LOG" 2>&1
 
 echo ""
 echo "=== Bark launch $(date) ==="
+echo "DIR: $DIR"
 
 cd "$DIR" || {
-    osascript -e 'display alert "Bark" message "Project folder not found.\n\nRebuild: cd /path/to/bark && ./create-app.sh" as critical'
+    show_error "Could not cd to project folder."
     exit 1
 }
 
 if [ ! -f "$PYTHON" ]; then
-    osascript -e 'display alert "Bark" message "Virtual environment not found.\n\nRun: ./setup-mac.sh" as warning'
+    echo "ERROR: venv Python not found at $PYTHON"
+    show_error "Virtual environment not found.\n\nRun: ./setup-mac.sh"
     exit 1
 fi
 
@@ -48,13 +61,19 @@ echo "Arch: $(file "$PYTHON" | grep -o 'arm64\|x86_64')"
 
 if [ "$PYMINOR" -lt 11 ] 2>/dev/null; then
     echo "ERROR: Python $PYVER is too old (need 3.11+)"
-    osascript -e "display alert \"Bark\" message \"Python $PYVER is too old. Need 3.11+.\n\nDelete .venv and re-run: ./setup-mac.sh\" as critical"
+    show_error "Python $PYVER is too old. Need 3.11+.\n\nRe-run: ./setup-mac.sh"
     exit 1
 fi
 
+# Activate venv properly. Do NOT set PYTHONHOME -- it overrides pyvenv.cfg
+# and prevents Python from finding its standard library, causing a silent
+# fatal crash (no log output, no error dialog, just "nothing happens").
+export VIRTUAL_ENV="$DIR/.venv"
+export PATH="$DIR/.venv/bin:$PATH"
+unset PYTHONHOME
+
 # exec replaces this shell with Python so macOS sees the .app bundle
 # (not "Python") in permission dialogs and Dock
-export PYTHONHOME="$DIR/.venv"
 exec "$PYTHON" "$DIR/dictation.py"
 LAUNCHER
 
