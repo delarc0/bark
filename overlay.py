@@ -221,6 +221,21 @@ class Overlay:
             self._bits = None
             self._transparent = False
         else:
+            # Hide Python Dock icon BEFORE tkinter creates NSApplication
+            try:
+                from AppKit import NSApplication, NSApplicationActivationPolicyAccessory, NSImage
+                app = NSApplication.sharedApplication()
+                app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+                # Set Bark icon (shown in permission dialogs, Cmd+Tab if policy changes)
+                _icon_png = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
+                if os.path.exists(_icon_png):
+                    ns_icon = NSImage.alloc().initWithContentsOfFile_(_icon_png)
+                    if ns_icon:
+                        app.setApplicationIconImage_(ns_icon)
+                log.info("Set NSApplicationActivationPolicyAccessory (no Dock icon).")
+            except Exception as e:
+                log.warning(f"Could not set Mac activation policy: {e}")
+
             self._root = tk.Tk()
             self.root = self._root
             self.root.title("Bark")
