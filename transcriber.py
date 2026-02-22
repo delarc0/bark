@@ -1,7 +1,7 @@
 import logging
 import re
 import numpy as np
-from config import MODEL_SIZE, DEVICE, COMPUTE_TYPE, LANGUAGE, BEAM_SIZE, SAMPLE_RATE, IS_MAC
+from config import cfg, MODEL_SIZE, DEVICE, COMPUTE_TYPE, SAMPLE_RATE, IS_MAC
 
 log = logging.getLogger(__name__)
 
@@ -87,20 +87,45 @@ class Transcriber:
         result = self._mlx.transcribe(
             audio,
             path_or_hf_repo=MODEL_SIZE,
-            language=LANGUAGE,
+            language=cfg["language"],
         )
 
-        if LANGUAGE is None and result.get("language"):
+        if cfg["language"] is None and result.get("language"):
             log.info(f"Detected language: {result['language']}")
 
         raw = " ".join(s["text"].strip() for s in result.get("segments", [])).strip()
         return clean_text(raw)
 
+    def transcribe_preview(self, audio: np.ndarray) -> str:
+        """Fast preview transcription (lower quality, for streaming display)."""
+        if len(audio) == 0:
+            return ""
+        try:
+            if IS_MAC:
+                result = self._mlx.transcribe(
+                    audio,
+                    path_or_hf_repo=MODEL_SIZE,
+                    language=cfg["language"],
+                )
+                raw = " ".join(s["text"].strip() for s in result.get("segments", [])).strip()
+            else:
+                segments, _ = self.model.transcribe(
+                    audio,
+                    beam_size=1,
+                    language=cfg["language"],
+                    vad_filter=False,
+                )
+                raw = " ".join(s.text.strip() for s in segments).strip()
+            return clean_text(raw)
+        except Exception as e:
+            log.debug(f"Preview transcription failed: {e}")
+            return ""
+
     def _transcribe_faster_whisper(self, audio: np.ndarray) -> str:
         segments, info = self.model.transcribe(
             audio,
-            beam_size=BEAM_SIZE,
-            language=LANGUAGE,
+            beam_size=cfg["beam_size"],
+            language=cfg["language"],
             vad_filter=True,
             vad_parameters=dict(
                 min_silence_duration_ms=500,
@@ -108,7 +133,7 @@ class Transcriber:
             ),
         )
 
-        if LANGUAGE is None and info:
+        if cfg["language"] is None and info:
             log.info(f"Detected language: {info.language} ({info.language_probability:.0%})")
 
         raw = " ".join(s.text.strip() for s in segments).strip()

@@ -40,18 +40,24 @@ from transcriber import Transcriber
 from keyboard_hook import KeyboardHook
 from feedback import beep_start, beep_stop, beep_done
 from overlay import Overlay
-from config import IS_MAC, SAMPLE_RATE, MIN_AUDIO_DURATION, AUTO_STOP, TRIGGER_KEY_NAME
+from tray import SystemTray
+from history import append_history
+from version_check import check_for_update
+from config import cfg, IS_MAC, SAMPLE_RATE, TRIGGER_KEY_NAME
 
 
 def main():
     def on_quit():
+        if ctx.get("tray"):
+            ctx["tray"].stop()
         if ctx["recorder"]:
             ctx["recorder"].shutdown()
         if ctx["hook"]:
             ctx["hook"].stop()
-        log.info("Quit via overlay menu.")
+        log.info("Quit.")
 
     ui = Overlay(on_quit=on_quit)
+    tray = SystemTray(overlay=ui, on_quit=on_quit)
     lock = threading.Lock()
 
     # All mutable state in one dict - avoids nonlocal closure issues
@@ -59,6 +65,7 @@ def main():
         "recorder": None,
         "transcriber": None,
         "hook": None,
+        "tray": tray,
         "ready": False,
         "recording": False,
     }
@@ -69,7 +76,7 @@ def main():
         ui.set_state("transcribing")
 
         duration = len(audio) / SAMPLE_RATE
-        if duration < MIN_AUDIO_DURATION:
+        if duration < cfg["min_audio_duration"]:
             log.info(f"Skipped - too short ({duration:.2f}s)")
             ui.set_state("idle")
             return
@@ -83,10 +90,29 @@ def main():
             log.info(f"[{elapsed:.2f}s] {text}")
             ctx["hook"].type_text(text)
             beep_done()
+            ui.flash_transcript(text)
+            append_history(text)
             ui.set_state("done")
         else:
             log.info(f"No speech detected ({elapsed:.2f}s)")
             ui.set_state("idle")
+
+    def _streaming_preview_loop():
+        """Background loop: grab audio snapshot every ~1.2s and show partial text."""
+        while ctx["recording"]:
+            time.sleep(1.2)
+            if not ctx["recording"]:
+                break
+            try:
+                snapshot = ctx["recorder"].get_audio_snapshot()
+                if len(snapshot) < SAMPLE_RATE * 0.5:
+                    continue
+                preview = ctx["transcriber"].transcribe_preview(snapshot)
+                if preview and ctx["recording"]:
+                    snippet = preview[:30] + "..." if len(preview) > 30 else preview
+                    ui.set_sublabel(snippet)
+            except Exception as e:
+                log.debug(f"Streaming preview error: {e}")
 
     def on_record_start():
         with lock:
@@ -95,11 +121,13 @@ def main():
             ctx["recording"] = True
         beep_start()
         ui.set_state("recording")
-        if AUTO_STOP:
+        if cfg["auto_stop"]:
             ctx["recorder"].start(on_silence=on_auto_stop)
         else:
             ctx["recorder"].start()
         log.info("Recording started")
+        if cfg["streaming_preview"]:
+            threading.Thread(target=_streaming_preview_loop, daemon=True).start()
 
     def on_record_stop():
         with lock:
@@ -143,7 +171,7 @@ def main():
                 ui.set_state("error")
                 return
             ctx["ready"] = True
-            mode = "auto-stop" if AUTO_STOP else "hold-to-record"
+            mode = "auto-stop" if cfg["auto_stop"] else "hold-to-record"
             log.info(f"Ready ({mode}). Hold {TRIGGER_KEY_NAME} to dictate.")
             ui.set_state("idle")
             # Mac: poll the event queue from tkinter's main loop
@@ -169,11 +197,24 @@ def main():
 
     threading.Thread(target=init_backend, daemon=True).start()
 
+    # System tray icon (daemon thread)
+    tray.start()
+
+    # Background version check
+    def _check_version():
+        latest = check_for_update()
+        if latest:
+            log.info(f"Update available: v{latest}")
+            ui.set_sublabel(f"UPDATE v{latest}")
+
+    threading.Thread(target=_check_version, daemon=True).start()
+
     try:
         ui.run()
     except KeyboardInterrupt:
         pass
     finally:
+        tray.stop()
         if ctx["hook"]:
             ctx["hook"].stop()
         if ctx["recorder"]:

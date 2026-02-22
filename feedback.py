@@ -6,7 +6,7 @@ import tempfile
 import wave
 
 import numpy as np
-from config import BEEP_VOLUME, IS_MAC
+from config import cfg, IS_MAC
 
 log = logging.getLogger(__name__)
 
@@ -18,52 +18,44 @@ def _make_samples(samples: list[float]) -> np.ndarray:
     return np.array(samples, dtype=np.float32)
 
 
-def _generate_blip(freq_start: int, freq_end: int, duration_ms: int, volume: float) -> np.ndarray:
-    """Short frequency sweep with fast fade - subtle terminal blip."""
+def _generate_pop(freq: int, duration_ms: int, volume: float) -> np.ndarray:
+    """Soft pop with exponential decay and 2nd harmonic for warmth."""
     n = int(SAMPLE_RATE * duration_ms / 1000)
-    fade = min(n // 3, 100)
     samples = []
     for i in range(n):
         t = i / SAMPLE_RATE
-        freq = freq_start + (freq_end - freq_start) * (i / n)
-        phase = 2 * math.pi * freq * t
-        s = volume * math.sin(phase)
-        if i < fade:
-            s *= i / fade
-        elif i > n - fade:
-            s *= (n - i) / fade
-        samples.append(s)
+        env = math.exp(-t * 40)
+        s = math.sin(2 * math.pi * freq * t)
+        s += 0.25 * math.sin(2 * math.pi * freq * 2 * t)
+        samples.append(volume * env * s)
     return _make_samples(samples)
 
 
-def _generate_chime(volume: float) -> np.ndarray:
-    """Two-tone ascending chime - soft game notification."""
-    note1_freq, note2_freq = 660, 990  # E5 -> B5 (pleasant interval)
-    note_ms = 50
-    gap_ms = 15
+def _generate_warm_chime(volume: float) -> np.ndarray:
+    """Gentle two-note ascending chime with exponential decay."""
+    freqs = [440, 554]  # A4 -> C#5 (major third)
+    note_ms = 70
+    gap_ms = 20
     n_note = int(SAMPLE_RATE * note_ms / 1000)
     n_gap = int(SAMPLE_RATE * gap_ms / 1000)
-    fade = min(n_note // 3, 80)
 
     samples = []
-    for freq in [note1_freq, note2_freq]:
+    for idx, freq in enumerate(freqs):
         for i in range(n_note):
             t = i / SAMPLE_RATE
-            s = volume * math.sin(2 * math.pi * freq * t)
-            if i < fade:
-                s *= i / fade
-            elif i > n_note - fade:
-                s *= (n_note - i) / fade
-            samples.append(s)
-        if freq == note1_freq:
+            env = math.exp(-t * 25)
+            s = math.sin(2 * math.pi * freq * t)
+            s += 0.25 * math.sin(2 * math.pi * freq * 2 * t)
+            samples.append(volume * env * s)
+        if idx == 0:
             samples.extend([0.0] * n_gap)
 
     return _make_samples(samples)
 
 
 # Pre-generate tones at import time
-_TONE_START = _generate_blip(600, 900, 35, BEEP_VOLUME * 0.6)
-_TONE_DONE = _generate_chime(BEEP_VOLUME * 0.5)
+_TONE_START = _generate_pop(380, 55, cfg["beep_volume"] * 0.5)
+_TONE_DONE = _generate_warm_chime(cfg["beep_volume"] * 0.4)
 
 
 def _save_wav(data: np.ndarray, path: str):
@@ -96,13 +88,15 @@ if IS_MAC:
             log.warning(f"Beep failed: {e}")
 
     def beep_start():
-        _play_mac(_WAV_START)
+        if cfg["sound_enabled"]:
+            _play_mac(_WAV_START)
 
     def beep_stop():
         pass
 
     def beep_done():
-        _play_mac(_WAV_DONE)
+        if cfg["sound_enabled"]:
+            _play_mac(_WAV_DONE)
 
 else:
     import sounddevice as sd
@@ -114,10 +108,12 @@ else:
             log.warning(f"Beep failed: {e}")
 
     def beep_start():
-        _play_async(_TONE_START)
+        if cfg["sound_enabled"]:
+            _play_async(_TONE_START)
 
     def beep_stop():
         pass
 
     def beep_done():
-        _play_async(_TONE_DONE)
+        if cfg["sound_enabled"]:
+            _play_async(_TONE_DONE)
