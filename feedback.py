@@ -18,36 +18,41 @@ def _make_samples(samples: list[float]) -> np.ndarray:
     return np.array(samples, dtype=np.float32)
 
 
-def _generate_pop(freq: int, duration_ms: int, volume: float) -> np.ndarray:
-    """Soft pop with exponential decay and 2nd harmonic for warmth."""
+def _generate_rising_chirp(volume: float) -> np.ndarray:
+    """Quick rising frequency sweep -- clearly 'starting', not a system click."""
+    duration_ms = 80
+    f_start, f_end = 480, 880
     n = int(SAMPLE_RATE * duration_ms / 1000)
     samples = []
     for i in range(n):
         t = i / SAMPLE_RATE
-        env = math.exp(-t * 40)
+        progress = i / n
+        freq = f_start + (f_end - f_start) * progress
+        env = math.sin(math.pi * progress)  # smooth fade in/out
         s = math.sin(2 * math.pi * freq * t)
-        s += 0.25 * math.sin(2 * math.pi * freq * 2 * t)
         samples.append(volume * env * s)
     return _make_samples(samples)
 
 
-def _generate_soft_tick(volume: float) -> np.ndarray:
-    """Very short low-freq tick -- a subtle 'done' confirmation."""
-    freq = 220  # A3, low and unobtrusive
-    duration_ms = 30
+def _generate_falling_boop(volume: float) -> np.ndarray:
+    """Short descending tone -- a gentle 'done' that doesn't sound like a system click."""
+    duration_ms = 100
+    f_start, f_end = 660, 440
     n = int(SAMPLE_RATE * duration_ms / 1000)
     samples = []
     for i in range(n):
         t = i / SAMPLE_RATE
-        env = math.exp(-t * 80)  # fast decay
+        progress = i / n
+        freq = f_start + (f_end - f_start) * progress
+        env = 1.0 - progress  # linear fade out
         s = math.sin(2 * math.pi * freq * t)
         samples.append(volume * env * s)
     return _make_samples(samples)
 
 
 # Pre-generate tones at import time
-_TONE_START = _generate_pop(380, 55, cfg["beep_volume"] * 0.5)
-_TONE_DONE = _generate_soft_tick(cfg["beep_volume"] * 0.4)
+_TONE_START = _generate_rising_chirp(cfg["beep_volume"] * 0.45)
+_TONE_DONE = _generate_falling_boop(cfg["beep_volume"] * 0.35)
 
 
 def _save_wav(data: np.ndarray, path: str):
