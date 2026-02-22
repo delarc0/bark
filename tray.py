@@ -148,6 +148,53 @@ class SystemTray:
 
     # ================================================================ macOS NSStatusItem
 
+    @staticmethod
+    def _make_menubar_icon():
+        """Create a template-ready NSImage from icon.png.
+
+        Extracts the white dog silhouette from the app icon (white dog on dark
+        background) and returns it as a black-on-transparent image suitable for
+        macOS template rendering.
+        """
+        try:
+            from PIL import Image
+            import io
+
+            src_path = os.path.join(_dir, "icon.png")
+            if not os.path.exists(src_path):
+                log.warning(f"icon.png not found at {src_path}")
+                return None
+
+            img = Image.open(src_path).convert("RGBA")
+            # Resize to 36x36 (2x for Retina, displayed at 18x18)
+            img = img.resize((36, 36), Image.LANCZOS)
+
+            # Extract the bright (white dog) pixels as opaque black.
+            # Dark background pixels become transparent.
+            pixels = img.load()
+            for y in range(img.height):
+                for x in range(img.width):
+                    r, g, b, a = pixels[x, y]
+                    brightness = (r + g + b) / 3
+                    if brightness > 160:
+                        # Bright pixel (dog) → opaque black (template will recolor)
+                        pixels[x, y] = (0, 0, 0, 255)
+                    else:
+                        # Dark pixel (background) → transparent
+                        pixels[x, y] = (0, 0, 0, 0)
+
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            ns_data = buf.getvalue()
+
+            from AppKit import NSData
+            data = NSData.dataWithBytes_length_(ns_data, len(ns_data))
+            ns_img = NSImage.alloc().initWithData_(data)
+            return ns_img
+        except Exception as e:
+            log.warning(f"Failed to create menu bar icon: {e}")
+            return None
+
     def _setup_mac_tray(self):
         global _tray_ref
         _tray_ref = self
@@ -171,32 +218,37 @@ class SystemTray:
             self._mac_menu.setAutoenablesItems_(False)
             self._mac_menu.setDelegate_(self._mac_delegate)
 
-            # Load app icon for menu bar (18x18, template mode for dark/light)
-            _icon_png = os.path.join(_dir, "icon.png")
-            if os.path.exists(_icon_png):
-                icon_img = NSImage.alloc().initWithContentsOfFile_(_icon_png)
-                if icon_img:
-                    icon_img.setSize_(NSSize(18, 18))
-                    icon_img.setTemplate_(True)  # adapts to menu bar light/dark
-                    btn.setImage_(icon_img)
+            # Build a menu bar template icon from icon.png.
+            # icon.png is a full app icon (dark bg + white dog) that blends into
+            # the dark menu bar. Extract the dog silhouette as a template image
+            # so macOS auto-colors it for light/dark mode.
+            self._mac_icon = None  # strong reference to prevent GC
+            icon_img = self._make_menubar_icon()
+            if icon_img:
+                icon_img.setTemplate_(True)
+                icon_img.setSize_(NSSize(18, 18))
+                btn.setImage_(icon_img)
+                self._mac_icon = icon_img
+                log.info("Menu bar icon: template image ready")
+            else:
+                btn.setTitle_("\U0001F415")  # 🐕 fallback
+                log.warning("Menu bar icon: using emoji fallback")
 
             self._build_mac_menu()
             self._status_item.setMenu_(self._mac_menu)
             self._update_mac_icon()
 
-            log.info("Mac menu bar icon ready.")
+            log.info(f"Mac menu bar icon ready. Button frame: {btn.frame()}")
         except Exception as e:
             log.error(f"Failed to create menu bar icon: {e}", exc_info=True)
 
     def _update_mac_icon(self):
-        """Set the menu bar dot color based on current state."""
+        """Update the colored status dot next to the dog icon."""
         if not self._status_item:
             return
-
         btn = self._status_item.button()
         if not btn:
             return
-
         try:
             colors = {
                 "idle": NSColor.systemGreenColor(),
@@ -207,18 +259,16 @@ class SystemTray:
                 "error": NSColor.systemRedColor(),
             }
             color = colors.get(self._state, NSColor.systemGreenColor())
-
             attrs = {
                 NSForegroundColorAttributeName: color,
-                NSFontAttributeName: NSFont.systemFontOfSize_(14),
+                NSFontAttributeName: NSFont.systemFontOfSize_(9),
             }
-            title = NSAttributedString.alloc().initWithString_attributes_(
-                "\u25CF", attrs  # ● solid circle
+            dot = NSAttributedString.alloc().initWithString_attributes_(
+                "\u25CF", attrs  # ● small colored dot
             )
-            btn.setAttributedTitle_(title)
-        except Exception as e:
-            log.warning(f"Attributed title failed, using plain text: {e}")
-            btn.setTitle_("\u25CF")
+            btn.setAttributedTitle_(dot)
+        except Exception:
+            pass
 
     def _build_mac_menu(self):
         """Build the full menu. Called once at setup and rebuilt on refresh."""
