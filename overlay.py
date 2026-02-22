@@ -538,6 +538,11 @@ class Overlay:
             r = DOT_R * rs
             dot_rgb = (122, 253, 181)
             glow_alpha = 90
+        elif st == "loading":
+            t = (math.sin(f * 0.02) + 1) / 2
+            r = DOT_R * rs
+            dot_rgb = (255, 215, 0)
+            glow_alpha = round(30 + 30 * t)
         else:
             t = (math.sin(f * 0.03) + 1) / 2
             r = DOT_R * rs

@@ -57,6 +57,14 @@ class SystemTray:
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
+        # macOS: pystray uses AppKit/NSApplication which must run on the main
+        # thread. Running it from a daemon thread causes a Cocoa-level crash
+        # (SIGABRT) that kills the entire process before any UI appears.
+        # The overlay right-click menu provides all settings on Mac.
+        if IS_MAC:
+            log.info("System tray skipped on macOS (use overlay right-click menu).")
+            return
+
         try:
             import pystray
             from PIL import Image
