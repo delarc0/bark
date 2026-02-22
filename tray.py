@@ -65,11 +65,13 @@ if IS_MAC:
             NSFont,
             NSAttributedString,
             NSColor,
+            NSImage,
             NSOnState,
             NSOffState,
             NSForegroundColorAttributeName,
             NSFontAttributeName,
         )
+        from Foundation import NSSize
         from Foundation import NSObject as _NSObj
 
         class _MenuTarget(_NSObj):
@@ -168,6 +170,15 @@ class SystemTray:
             self._mac_menu = NSMenu.alloc().init()
             self._mac_menu.setAutoenablesItems_(False)
             self._mac_menu.setDelegate_(self._mac_delegate)
+
+            # Load app icon for menu bar (18x18, template mode for dark/light)
+            _icon_png = os.path.join(_dir, "icon.png")
+            if os.path.exists(_icon_png):
+                icon_img = NSImage.alloc().initWithContentsOfFile_(_icon_png)
+                if icon_img:
+                    icon_img.setSize_(NSSize(18, 18))
+                    icon_img.setTemplate_(True)  # adapts to menu bar light/dark
+                    btn.setImage_(icon_img)
 
             self._build_mac_menu()
             self._status_item.setMenu_(self._mac_menu)
