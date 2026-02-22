@@ -137,6 +137,11 @@ SHADOW_PAD = _s(22)
 WIN_W = PILL_W + SHADOW_PAD * 2
 WIN_H = PILL_H + SHADOW_PAD * 2
 
+# Mac: pill-sized window (Cocoa CALayer handles rounded corners + system shadow)
+# Windows: full window with shadow padding (per-pixel alpha via UpdateLayeredWindow)
+DISPLAY_W = PILL_W if IS_MAC else WIN_W
+DISPLAY_H = PILL_H if IS_MAC else WIN_H
+
 PX = SHADOW_PAD
 PY = SHADOW_PAD
 
@@ -242,11 +247,12 @@ class Overlay:
                 except Exception as e:
                     log.warning(f"Could not hide Dock icon: {e}")
 
-            self.root.after(1000, _hide_dock_icon)
+            self.root.after(300, _hide_dock_icon)
             self.root.overrideredirect(True)
             self.root.attributes("-topmost", True)
-            # macOS: per-pixel transparency so only the pill is visible
-            # (without this, the shadow padding renders as a black rectangle)
+            # macOS: per-pixel transparency so only the pill is visible.
+            # Tk's -transparent attribute is unreliable with overrideredirect,
+            # so we also configure the NSWindow directly via Cocoa (see below).
             self._transparent = False
             try:
                 self.root.attributes("-transparent", True)
@@ -258,6 +264,7 @@ class Overlay:
                 except tk.TclError:
                     pass
                 self.root.configure(bg=BLACK)
+            self._mac_transparency_fixed = False
 
         # Font
         self._font = MONO_FONT
@@ -275,17 +282,16 @@ class Overlay:
         if cfg["overlay_x"] is not None and cfg["overlay_y"] is not None:
             x, y = cfg["overlay_x"], cfg["overlay_y"]
         else:
-            x = (sw - WIN_W) // 2
-            y = sh - WIN_H - 60
-        self.root.geometry(f"{WIN_W}x{WIN_H}+{x}+{y}")
+            x = (sw - DISPLAY_W) // 2
+            y = sh - DISPLAY_H - 60
+        self.root.geometry(f"{DISPLAY_W}x{DISPLAY_H}+{x}+{y}")
 
         if IS_WIN:
             self.root.withdraw()
-        elif cfg["show_overlay"]:
-            self.root.deiconify()
-        else:
+        elif not cfg["show_overlay"]:
             # Mac tray-only mode: keep window hidden, mainloop still runs
             self._visible = False
+        # Mac with show_overlay: stay withdrawn until first frame renders (see _animate)
         self.root.update_idletasks()
 
         # Focus steal prevention (Windows)
@@ -303,11 +309,17 @@ class Overlay:
         self.root.bind("<Button-1>", self._drag_start)
         self.root.bind("<B1-Motion>", self._drag_move)
 
-        # Right-click
+        # Right-click: bind all variants so it works cross-platform
+        # macOS: Button-2 (two-finger tap), Control-Button-1 (Ctrl+click)
+        # Windows: Button-3
+        self.root.bind("<Button-2>", self._show_menu)
         self.root.bind("<Button-3>", self._show_menu)
+        if IS_MAC:
+            self.root.bind("<Control-Button-1>", self._show_menu)
 
-        # Visibility / idle
-        self._visible = True
+        # Visibility / idle (_visible may already be False from Mac tray-only init)
+        if not hasattr(self, "_visible"):
+            self._visible = True
         self._idle_job = None
 
         # Theme
@@ -318,11 +330,17 @@ class Overlay:
         if not IS_WIN:
             canvas_bg = "systemTransparent" if self._transparent else BLACK
             self.canvas = tk.Canvas(
-                self.root, width=WIN_W, height=WIN_H,
+                self.root, width=DISPLAY_W, height=DISPLAY_H,
                 bg=canvas_bg, highlightthickness=0, bd=0,
             )
             self.canvas.pack()
             self._canvas_img = self.canvas.create_image(0, 0, anchor="nw")
+            # Mac: duplicate drag + right-click bindings on canvas (it captures all events)
+            self.canvas.bind("<Button-1>", self._drag_start)
+            self.canvas.bind("<B1-Motion>", self._drag_move)
+            self.canvas.bind("<Button-2>", self._show_menu)
+            self.canvas.bind("<Button-3>", self._show_menu)
+            self.canvas.bind("<Control-Button-1>", self._show_menu)
 
         # State
         self._state = "idle"
@@ -467,6 +485,12 @@ class Overlay:
             self._bar_heights[i] += (target - self._bar_heights[i]) * 0.25
 
         self._render_frame()
+
+        # Mac: deiconify after first frame so the pill is already drawn (no empty flash)
+        if IS_MAC and self._frame == 1 and self._visible and cfg["show_overlay"]:
+            self._fix_mac_transparency()
+            self.root.deiconify()
+
         self._anim_job = self._root.after(33, self._animate)
 
     def _get_level(self):
@@ -525,15 +549,10 @@ class Overlay:
         # 6. Display
         if IS_WIN:
             self._update_layered(frame)
-        elif self._transparent:
-            # macOS transparent window: alpha channel is composited by Quartz
-            self._photo = ImageTk.PhotoImage(frame)
-            self.canvas.itemconfig(self._canvas_img, image=self._photo)
         else:
-            # Fallback: flatten to RGB on black
-            bg = Image.new("RGB", (WIN_W, WIN_H), (0, 0, 0))
-            bg.paste(frame, (0, 0), frame)
-            self._photo = ImageTk.PhotoImage(bg)
+            # Mac: crop to pill bounds — Cocoa CALayer handles rounded corners + shadow
+            pill = frame.crop((PX, PY, PX + PILL_W, PY + PILL_H))
+            self._photo = ImageTk.PhotoImage(pill)
             self.canvas.itemconfig(self._canvas_img, image=self._photo)
 
     def _draw_bars(self, draw, rs):
@@ -691,7 +710,7 @@ class Overlay:
         tip.update_idletasks()
 
         tw = tip.winfo_reqwidth()
-        ox = self.root.winfo_x() + (WIN_W - tw) // 2
+        ox = self.root.winfo_x() + (DISPLAY_W - tw) // 2
         oy = self.root.winfo_y() - _s(30)
         tip.geometry(f"+{ox}+{oy}")
 
@@ -707,6 +726,30 @@ class Overlay:
             pass
 
     # ============================================================ window mechanics
+
+    def _fix_mac_transparency(self):
+        """Configure Cocoa NSWindow for pill-shaped display.
+
+        Tk's ImageTk.PhotoImage ignores alpha for window compositing, so we
+        render a pill-sized image and use CALayer to clip rounded corners.
+        The system provides the drop shadow automatically.
+        """
+        if getattr(self, "_mac_transparency_fixed", False):
+            return
+        try:
+            from AppKit import NSApplication, NSColor
+            for window in NSApplication.sharedApplication().windows():
+                window.setOpaque_(False)
+                window.setBackgroundColor_(NSColor.clearColor())
+                window.setHasShadow_(True)
+                view = window.contentView()
+                view.setWantsLayer_(True)
+                view.layer().setCornerRadius_(PILL_R)
+                view.layer().setMasksToBounds_(True)
+            self._mac_transparency_fixed = True
+            log.info("Cocoa window styling configured (rounded corners + shadow).")
+        except Exception as e:
+            log.warning(f"Cocoa styling failed: {e}")
 
     def _keep_on_top(self):
         try:
@@ -829,6 +872,8 @@ class Overlay:
         if not self._visible:
             self._visible = True
             self._opacity = max(self._opacity, 0.01)
+            if IS_MAC:
+                self._fix_mac_transparency()
             self.root.deiconify()
             self.root.lift()
             if IS_WIN:
