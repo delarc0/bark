@@ -94,8 +94,10 @@ if IS_MAC:
                         log.error(f"Menu refresh error: {e}")
 
         _APPKIT_OK = True
+        log.info("AppKit loaded OK - menu bar icon available.")
     except ImportError as e:
-        log.info(f"AppKit not available for menu bar: {e}")
+        log.warning(f"AppKit not available for menu bar: {e}. "
+                    "Install: pip install pyobjc-framework-Cocoa")
 
 
 # --- Tag constants for Mac menu items ---
@@ -125,10 +127,11 @@ class SystemTray:
     def start(self):
         if IS_MAC:
             if _APPKIT_OK:
-                # NSStatusItem must be created on the main thread (AppKit requirement)
+                log.info("Scheduling Mac menu bar setup on main thread...")
                 self._overlay._root.after(100, self._setup_mac_tray)
             else:
-                log.info("Mac menu bar skipped (AppKit not available).")
+                log.warning("Mac menu bar skipped (AppKit not available). "
+                            "Install: pip install pyobjc-framework-Cocoa")
         else:
             threading.Thread(target=self._run, daemon=True).start()
 
@@ -150,6 +153,14 @@ class SystemTray:
         try:
             sb = NSStatusBar.systemStatusBar()
             self._status_item = sb.statusItemWithLength_(NSVariableStatusItemLength)
+            if not self._status_item:
+                log.error("NSStatusBar returned nil status item.")
+                return
+
+            btn = self._status_item.button()
+            if not btn:
+                log.error("NSStatusItem button is nil.")
+                return
 
             self._mac_target = _MenuTarget.alloc().init()
             self._mac_delegate = _MenuDelegate.alloc().init()
@@ -171,24 +182,32 @@ class SystemTray:
         if not self._status_item:
             return
 
-        colors = {
-            "idle": NSColor.systemGreenColor(),
-            "loading": NSColor.systemOrangeColor(),
-            "recording": NSColor.systemRedColor(),
-            "transcribing": NSColor.systemYellowColor(),
-            "done": NSColor.systemGreenColor(),
-            "error": NSColor.systemRedColor(),
-        }
-        color = colors.get(self._state, NSColor.systemGreenColor())
+        btn = self._status_item.button()
+        if not btn:
+            return
 
-        attrs = {
-            NSForegroundColorAttributeName: color,
-            NSFontAttributeName: NSFont.systemFontOfSize_(12),
-        }
-        title = NSAttributedString.alloc().initWithString_attributes_(
-            "\u25CF", attrs  # ● solid circle
-        )
-        self._status_item.button().setAttributedTitle_(title)
+        try:
+            colors = {
+                "idle": NSColor.systemGreenColor(),
+                "loading": NSColor.systemOrangeColor(),
+                "recording": NSColor.systemRedColor(),
+                "transcribing": NSColor.systemYellowColor(),
+                "done": NSColor.systemGreenColor(),
+                "error": NSColor.systemRedColor(),
+            }
+            color = colors.get(self._state, NSColor.systemGreenColor())
+
+            attrs = {
+                NSForegroundColorAttributeName: color,
+                NSFontAttributeName: NSFont.systemFontOfSize_(14),
+            }
+            title = NSAttributedString.alloc().initWithString_attributes_(
+                "\u25CF", attrs  # ● solid circle
+            )
+            btn.setAttributedTitle_(title)
+        except Exception as e:
+            log.warning(f"Attributed title failed, using plain text: {e}")
+            btn.setTitle_("\u25CF")
 
     def _build_mac_menu(self):
         """Build the full menu. Called once at setup and rebuilt on refresh."""

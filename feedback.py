@@ -31,31 +31,23 @@ def _generate_pop(freq: int, duration_ms: int, volume: float) -> np.ndarray:
     return _make_samples(samples)
 
 
-def _generate_warm_chime(volume: float) -> np.ndarray:
-    """Gentle two-note ascending chime with exponential decay."""
-    freqs = [440, 554]  # A4 -> C#5 (major third)
-    note_ms = 70
-    gap_ms = 20
-    n_note = int(SAMPLE_RATE * note_ms / 1000)
-    n_gap = int(SAMPLE_RATE * gap_ms / 1000)
-
+def _generate_soft_tick(volume: float) -> np.ndarray:
+    """Very short low-freq tick -- a subtle 'done' confirmation."""
+    freq = 220  # A3, low and unobtrusive
+    duration_ms = 30
+    n = int(SAMPLE_RATE * duration_ms / 1000)
     samples = []
-    for idx, freq in enumerate(freqs):
-        for i in range(n_note):
-            t = i / SAMPLE_RATE
-            env = math.exp(-t * 25)
-            s = math.sin(2 * math.pi * freq * t)
-            s += 0.25 * math.sin(2 * math.pi * freq * 2 * t)
-            samples.append(volume * env * s)
-        if idx == 0:
-            samples.extend([0.0] * n_gap)
-
+    for i in range(n):
+        t = i / SAMPLE_RATE
+        env = math.exp(-t * 80)  # fast decay
+        s = math.sin(2 * math.pi * freq * t)
+        samples.append(volume * env * s)
     return _make_samples(samples)
 
 
 # Pre-generate tones at import time
 _TONE_START = _generate_pop(380, 55, cfg["beep_volume"] * 0.5)
-_TONE_DONE = _generate_warm_chime(cfg["beep_volume"] * 0.4)
+_TONE_DONE = _generate_soft_tick(cfg["beep_volume"] * 0.4)
 
 
 def _save_wav(data: np.ndarray, path: str):
