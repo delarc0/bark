@@ -44,7 +44,7 @@ DEFAULT_CONFIG = {
     # Streaming preview
     "streaming_preview": False,
     # Version
-    "version": "1.1.0",
+    "version": "1.2.0",
 }
 
 

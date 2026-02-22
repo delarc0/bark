@@ -4,7 +4,7 @@
 
 [Setup]
 AppName=Bark
-AppVersion=1.0.0
+AppVersion=1.2.0
 AppPublisher=LAB37
 AppPublisherURL=https://lab37.se
 DefaultDirName={localappdata}\Bark
@@ -35,6 +35,9 @@ Source: "..\keyboard_hook.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\overlay.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\feedback.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\config.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\tray.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\history.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\version_check.py"; DestDir: "{app}"; Flags: ignoreversion
 ; Support files
 Source: "..\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
