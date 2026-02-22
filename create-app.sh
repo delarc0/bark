@@ -52,11 +52,10 @@ if [ "$PYMINOR" -lt 11 ] 2>/dev/null; then
     exit 1
 fi
 
-"$PYTHON" "$DIR/dictation.py" || {
-    LAST_ERR=$(tail -5 "$LOG" 2>/dev/null)
-    osascript -e "display alert \"Bark crashed\" message \"$LAST_ERR\" as critical" 2>/dev/null
-    exit 1
-}
+# exec replaces this shell with Python so macOS sees the .app bundle
+# (not "Python") in permission dialogs and Dock
+export PYTHONHOME="$DIR/.venv"
+exec "$PYTHON" "$DIR/dictation.py"
 LAUNCHER
 
 # Inject absolute project path into launcher

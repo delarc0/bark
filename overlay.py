@@ -166,6 +166,10 @@ class Overlay:
             self.root.bind("<FocusIn>", lambda e: self.root.after(1, self._refocus))
             self._root.after(2000, self._enable_refocus)
 
+        # Mac: periodically re-assert topmost (tkinter on macOS drops it)
+        if IS_MAC:
+            self._keep_on_top()
+
         # Drag to move
         self._drag_x = 0
         self._drag_y = 0
@@ -261,6 +265,14 @@ class Overlay:
         self._state = "idle"
         self._pulse_on = True
         self._pulse_job = None
+
+    def _keep_on_top(self):
+        try:
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+        except Exception:
+            pass
+        self._root.after(3000, self._keep_on_top)
 
     def _drag_start(self, event):
         self._drag_x = event.x
