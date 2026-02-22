@@ -113,93 +113,38 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
-# Generate app icon - waveform bars in LAB37 green on dark background
-# Uses numpy for fast vectorized rendering (no per-pixel Python loops)
+# Generate app icon from custom PNG (icon.png in project root)
 ICONSET="$APP_DIR/Contents/Resources/bark.iconset"
+ICON_SRC="$SCRIPT_DIR/icon.png"
 mkdir -p "$ICONSET"
 
-source "$SCRIPT_DIR/.venv/bin/activate" 2>/dev/null || true
+if [ ! -f "$ICON_SRC" ]; then
+    echo "Warning: icon.png not found - app will have no icon."
+else
+    source "$SCRIPT_DIR/.venv/bin/activate" 2>/dev/null || true
 
-ICONSET="$ICONSET" python3 -c "
-import struct, zlib, os
-import numpy as np
+    python3 -c "
+from PIL import Image
+import os, sys
 
-def create_icon(size):
-    s = size
-    img = np.zeros((s, s, 4), dtype=np.uint8)
+src = Image.open('$ICON_SRC').convert('RGBA')
+iconset = '$ICONSET'
 
-    # Coordinate grids
-    yy, xx = np.mgrid[0:s, 0:s].astype(np.float32)
-    cx, cy = s / 2, s / 2
+sizes = [
+    (16, '16x16'), (32, '16x16@2x'),
+    (32, '32x32'), (64, '32x32@2x'),
+    (128, '128x128'), (256, '128x128@2x'),
+    (256, '256x256'), (512, '256x256@2x'),
+    (512, '512x512'), (1024, '512x512@2x'),
+]
 
-    # Rounded rect mask
-    margin = s * 0.08
-    corner_r = s * 0.18
-    in_rect = (xx >= margin) & (xx < s - margin) & (yy >= margin) & (yy < s - margin)
-    # Cut corners
-    for (cxc, cyc) in [(margin + corner_r, margin + corner_r),
-                        (s - margin - corner_r, margin + corner_r),
-                        (margin + corner_r, s - margin - corner_r),
-                        (s - margin - corner_r, s - margin - corner_r)]:
-        corner_zone = ((xx < margin + corner_r) if cxc < cx else (xx > s - margin - corner_r)) & \
-                      ((yy < margin + corner_r) if cyc < cy else (yy > s - margin - corner_r))
-        dist = np.sqrt((xx - cxc)**2 + (yy - cyc)**2)
-        in_rect = in_rect & ~(corner_zone & (dist > corner_r))
+for sz, name in sizes:
+    resized = src.resize((sz, sz), Image.LANCZOS)
+    resized.save(os.path.join(iconset, f'icon_{name}.png'))
 
-    # Dark background
-    img[in_rect] = [0x0d, 0x0d, 0x0f, 255]
-
-    # Scanlines
-    scanline = (yy % 4 == 0) & in_rect
-    img[scanline] = [0x0a, 0x0a, 0x0c, 255]
-
-    # Waveform bars
-    bar_heights = [0.30, 0.55, 1.0, 0.70, 0.40]
-    bar_w = s * 0.09
-    bar_gap = s * 0.05
-    total_w = len(bar_heights) * bar_w + (len(bar_heights) - 1) * bar_gap
-    x_start = (s - total_w) / 2
-    max_h = s * 0.50
-
-    for i, bh in enumerate(bar_heights):
-        bx = x_start + i * (bar_w + bar_gap)
-        bar_h = bh * max_h
-        bar_top = cy - bar_h / 2
-        bar_bot = cy + bar_h / 2
-
-        bar_mask = (xx >= bx) & (xx < bx + bar_w) & (yy >= bar_top) & (yy <= bar_bot) & in_rect
-        img[bar_mask] = [0x42, 0xFC, 0x93, 255]
-
-        # Glow around bar
-        glow_r = s * 0.04
-        glow_zone = (xx >= bx - glow_r) & (xx < bx + bar_w + glow_r) & \
-                    (yy >= bar_top - glow_r) & (yy <= bar_bot + glow_r) & \
-                    in_rect & ~bar_mask
-        if np.any(glow_zone):
-            dx = np.maximum(0, np.maximum(bx - xx, xx - (bx + bar_w)))
-            dy = np.maximum(0, np.maximum(bar_top - yy, yy - bar_bot))
-            d = np.sqrt(dx**2 + dy**2)
-            glow_mask = glow_zone & (d < glow_r)
-            if np.any(glow_mask):
-                t = (1.0 - d[glow_mask] / glow_r) * 0.4 * bh
-                img[glow_mask, 0] = (0x0d + t * (0x1a - 0x0d)).astype(np.uint8)
-                img[glow_mask, 1] = (0x0d + t * (0x6b - 0x0d)).astype(np.uint8)
-                img[glow_mask, 2] = (0x0f + t * (0x3d - 0x0f)).astype(np.uint8)
-
-    # Encode PNG
-    raw = b''.join(bytes([0]) + row.tobytes() for row in img)
-    def chunk(ct, data):
-        c = ct + data
-        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xFFFFFFFF)
-    ihdr = struct.pack('>IIBBBBB', s, s, 8, 6, 0, 0, 0)
-    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
-
-iconset = os.environ['ICONSET']
-for sz, name in [(16,'16x16'),(32,'16x16@2x'),(32,'32x32'),(64,'32x32@2x'),(128,'128x128'),(256,'128x128@2x'),(256,'256x256'),(512,'256x256@2x'),(512,'512x512'),(1024,'512x512@2x')]:
-    with open(os.path.join(iconset, f'icon_{name}.png'), 'wb') as f:
-        f.write(create_icon(sz))
-print('Icon generated.')
+print('Icon generated from icon.png')
 "
+fi
 
 # Convert iconset to .icns
 if command -v iconutil &>/dev/null; then
