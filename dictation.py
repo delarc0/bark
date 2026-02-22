@@ -60,6 +60,8 @@ def main():
     tray = SystemTray(overlay=ui, on_quit=on_quit)
     ui.set_tray(tray)
     lock = threading.Lock()
+    # Serialize MLX/whisper access -- Metal crashes if two threads submit GPU work
+    transcribe_lock = threading.Lock()
 
     # All mutable state in one dict - avoids nonlocal closure issues
     ctx = {
@@ -84,7 +86,8 @@ def main():
 
         log.info(f"Transcribing {duration:.1f}s of audio...")
         t0 = time.time()
-        text = ctx["transcriber"].transcribe(audio)
+        with transcribe_lock:
+            text = ctx["transcriber"].transcribe(audio)
         elapsed = time.time() - t0
 
         if text:
@@ -108,7 +111,13 @@ def main():
                 snapshot = ctx["recorder"].get_audio_snapshot()
                 if len(snapshot) < SAMPLE_RATE * 0.5:
                     continue
-                preview = ctx["transcriber"].transcribe_preview(snapshot)
+                # Non-blocking: skip preview if main transcription owns the GPU
+                if not transcribe_lock.acquire(blocking=False):
+                    continue
+                try:
+                    preview = ctx["transcriber"].transcribe_preview(snapshot)
+                finally:
+                    transcribe_lock.release()
                 if preview and ctx["recording"]:
                     snippet = preview[:30] + "..." if len(preview) > 30 else preview
                     ui.set_sublabel(snippet)
