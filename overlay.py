@@ -219,6 +219,7 @@ class Overlay:
             self._hdc_mem = None
             self._hbmp = None
             self._bits = None
+            self._transparent = False
         else:
             self._root = tk.Tk()
             self.root = self._root
@@ -227,11 +228,19 @@ class Overlay:
             self.root.withdraw()
             self.root.overrideredirect(True)
             self.root.attributes("-topmost", True)
+            # macOS: per-pixel transparency so only the pill is visible
+            # (without this, the shadow padding renders as a black rectangle)
+            self._transparent = False
             try:
-                self.root.attributes("-alpha", 0.92)
+                self.root.attributes("-transparent", True)
+                self.root.config(bg="systemTransparent")
+                self._transparent = True
             except tk.TclError:
-                pass
-            self.root.configure(bg=BLACK)
+                try:
+                    self.root.attributes("-alpha", 0.92)
+                except tk.TclError:
+                    pass
+                self.root.configure(bg=BLACK)
 
         # Font
         self._font = MONO_FONT
@@ -287,9 +296,10 @@ class Overlay:
 
         # Canvas -- Mac only (Windows uses UpdateLayeredWindow)
         if not IS_WIN:
+            canvas_bg = "systemTransparent" if self._transparent else BLACK
             self.canvas = tk.Canvas(
                 self.root, width=WIN_W, height=WIN_H,
-                bg=BLACK, highlightthickness=0, bd=0,
+                bg=canvas_bg, highlightthickness=0, bd=0,
             )
             self.canvas.pack()
             self._canvas_img = self.canvas.create_image(0, 0, anchor="nw")
@@ -401,10 +411,14 @@ class Overlay:
                 self._anim_job = None
             return
 
-        # Mac: animate window-level alpha (no per-pixel alpha support)
+        # Mac: animate window-level alpha for idle fade
         if IS_MAC:
             try:
-                self.root.attributes("-alpha", max(0.05, self._opacity * 0.92))
+                if self._transparent:
+                    # Per-pixel alpha handles pill opacity; window alpha just for fade
+                    self.root.attributes("-alpha", max(0.05, self._opacity))
+                else:
+                    self.root.attributes("-alpha", max(0.05, self._opacity * 0.92))
             except tk.TclError:
                 pass
 
@@ -491,7 +505,12 @@ class Overlay:
         # 6. Display
         if IS_WIN:
             self._update_layered(frame)
+        elif self._transparent:
+            # macOS transparent window: alpha channel is composited by Quartz
+            self._photo = ImageTk.PhotoImage(frame)
+            self.canvas.itemconfig(self._canvas_img, image=self._photo)
         else:
+            # Fallback: flatten to RGB on black
             bg = Image.new("RGB", (WIN_W, WIN_H), (0, 0, 0))
             bg.paste(frame, (0, 0), frame)
             self._photo = ImageTk.PhotoImage(bg)
