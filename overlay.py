@@ -264,8 +264,11 @@ class Overlay:
 
         if IS_WIN:
             self.root.withdraw()
-        else:
+        elif cfg["show_overlay"]:
             self.root.deiconify()
+        else:
+            # Mac tray-only mode: keep window hidden, mainloop still runs
+            self._visible = False
         self.root.update_idletasks()
 
         # Focus steal prevention (Windows)
@@ -751,6 +754,14 @@ class Overlay:
         menu.add_command(label="Quit", command=self.quit)
         menu.tk_popup(event.x_root, event.y_root)
 
+    def _toggle_show_overlay(self):
+        cfg["show_overlay"] = not cfg["show_overlay"]
+        save_config()
+        if cfg["show_overlay"]:
+            self.show_overlay()
+        else:
+            self._hide_overlay()
+
     def _toggle_sound(self):
         cfg["sound_enabled"] = not cfg["sound_enabled"]
         save_config()
@@ -796,6 +807,8 @@ class Overlay:
         # Animation loop handles the fade + withdraw when opacity reaches 0
 
     def show_overlay(self):
+        if not cfg["show_overlay"]:
+            return
         if not self._visible:
             self._visible = True
             self._opacity = max(self._opacity, 0.01)
