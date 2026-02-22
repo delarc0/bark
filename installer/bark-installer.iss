@@ -43,8 +43,8 @@ Source: "..\start.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "setup-win.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Bark"; Filename: "{app}\start.bat"; IconFilename: "{app}\icon.ico"; WorkingDir: "{app}"
-Name: "{autodesktop}\Bark"; Filename: "{app}\start.bat"; IconFilename: "{app}\icon.ico"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\Bark"; Filename: "{app}\start.bat"; IconFilename: "{app}\icon.ico"; WorkingDir: "{app}"; AppUserModelID: "lab37.bark"
+Name: "{autodesktop}\Bark"; Filename: "{app}\start.bat"; IconFilename: "{app}\icon.ico"; WorkingDir: "{app}"; Tasks: desktopicon; AppUserModelID: "lab37.bark"
 
 [Run]
 Filename: "cmd.exe"; Parameters: "/k ""{app}\setup-win.bat"""; WorkingDir: "{app}"; Description: "Set up Python environment (required)"; Flags: postinstall nowait
