@@ -223,23 +223,26 @@ class Overlay:
         else:
             self._root = tk.Tk()
             self.root = self._root
+            self.root.withdraw()  # Hide immediately to prevent flash
             self.root.title("Bark")
-
-            # Hide Python Dock icon AFTER tkinter has initialized NSApplication
-            try:
-                from AppKit import NSApplication, NSApplicationActivationPolicyAccessory, NSImage
-                app = NSApplication.sharedApplication()
-                app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-                _icon_png = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
-                if os.path.exists(_icon_png):
-                    ns_icon = NSImage.alloc().initWithContentsOfFile_(_icon_png)
-                    if ns_icon:
-                        app.setApplicationIconImage_(ns_icon)
-                log.info("Set NSApplicationActivationPolicyAccessory (no Dock icon).")
-            except Exception as e:
-                log.warning(f"Could not set Mac activation policy: {e}")
             self.root.protocol("WM_DELETE_WINDOW", self.quit)
-            self.root.withdraw()
+
+            # Defer Dock icon hiding until after tray setup (at ~100ms)
+            def _hide_dock_icon():
+                try:
+                    from AppKit import NSApplication, NSApplicationActivationPolicyAccessory, NSImage
+                    app = NSApplication.sharedApplication()
+                    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+                    _icon_png = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
+                    if os.path.exists(_icon_png):
+                        ns_icon = NSImage.alloc().initWithContentsOfFile_(_icon_png)
+                        if ns_icon:
+                            app.setApplicationIconImage_(ns_icon)
+                    log.info("Dock icon hidden (Accessory policy).")
+                except Exception as e:
+                    log.warning(f"Could not hide Dock icon: {e}")
+
+            self.root.after(1000, _hide_dock_icon)
             self.root.overrideredirect(True)
             self.root.attributes("-topmost", True)
             # macOS: per-pixel transparency so only the pill is visible
