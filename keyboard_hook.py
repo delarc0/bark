@@ -4,7 +4,7 @@ import threading
 import time
 from pynput import keyboard
 import pyperclip
-from config import PASTE_DELAY, IS_WIN, IS_MAC
+from config import cfg, IS_WIN, IS_MAC
 
 if IS_WIN:
     import ctypes
@@ -27,6 +27,7 @@ if IS_MAC:
         kCGEventFlagsChanged,
         kCGKeyboardEventKeycode,
         kCGEventFlagMaskAlternate,
+        kCGEventFlagMaskCommand,
         kCFRunLoopCommonModes,
     )
 
@@ -37,8 +38,11 @@ WM_KEYDOWN = 256
 WM_KEYUP = 257
 KEYEVENTF_KEYUP = 0x2
 
-# Mac: Right Option keycode (0x3D = 61)
-MAC_RIGHT_OPTION_KEYCODE = 0x3D
+# Mac trigger key mappings: keycode + flag mask
+_MAC_TRIGGER_KEYS = {
+    "right_option":  (0x3D, kCGEventFlagMaskAlternate if IS_MAC else 0),
+    "right_command": (0x36, kCGEventFlagMaskCommand if IS_MAC else 0),
+}
 
 # Quartz event tap special types (not always exported by PyObjC)
 _TAP_DISABLED_BY_TIMEOUT = 0xFFFFFFFE
@@ -57,6 +61,11 @@ class KeyboardHook:
         self._tap_ready = threading.Event()
         self._tap_failed = False
         self._events = queue.Queue()  # Mac: decouple Quartz callback from Python work
+        if IS_MAC:
+            trigger = cfg["trigger_key_mac"]
+            self._mac_keycode, self._mac_flag_mask = _MAC_TRIGGER_KEYS.get(
+                trigger, _MAC_TRIGGER_KEYS["right_option"]
+            )
         if IS_WIN:
             self._initial_caps_state = self._get_caps_state()
 
@@ -103,16 +112,16 @@ class KeyboardHook:
             return event
 
         keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
-        if keycode != MAC_RIGHT_OPTION_KEYCODE:
+        if keycode != self._mac_keycode:
             return event
 
         flags = CGEventGetFlags(event)
-        option_down = bool(flags & kCGEventFlagMaskAlternate)
+        key_down = bool(flags & self._mac_flag_mask)
 
-        if option_down and not self._pressed:
+        if key_down and not self._pressed:
             self._pressed = True
             self._events.put("start")
-        elif not option_down and self._pressed:
+        elif not key_down and self._pressed:
             self._pressed = False
             self._events.put("stop")
 
@@ -150,7 +159,8 @@ class KeyboardHook:
         CFRunLoopAddSource(self._tap_loop, self._tap_source, kCFRunLoopCommonModes)
         CGEventTapEnable(self._tap, True)
 
-        log.info("Quartz event tap active (Right Option key).")
+        key_name = cfg["trigger_key_mac"].replace("_", " ").title()
+        log.info(f"Quartz event tap active ({key_name} key).")
         self._tap_ready.set()
         CFRunLoopRun()  # Block on this thread's run loop
 
@@ -180,6 +190,11 @@ class KeyboardHook:
             log.error(f"Record stop failed: {e}")
 
     def type_text(self, text: str):
+        # Clipboard mode: just copy, don't paste
+        if cfg["clipboard_mode"]:
+            pyperclip.copy(text)
+            return
+
         try:
             old_clipboard = pyperclip.paste()
         except Exception:
@@ -190,12 +205,12 @@ class KeyboardHook:
 
         try:
             pyperclip.copy(text)
-            time.sleep(PASTE_DELAY)
+            time.sleep(cfg["paste_delay"])
             self._controller.press(paste_modifier)
             self._controller.press("v")
             self._controller.release("v")
             self._controller.release(paste_modifier)
-            time.sleep(PASTE_DELAY)
+            time.sleep(cfg["paste_delay"])
         except Exception as e:
             log.error(f"Paste failed: {e}")
         finally:
