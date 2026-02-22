@@ -58,6 +58,7 @@ def main():
 
     ui = Overlay(on_quit=on_quit)
     tray = SystemTray(overlay=ui, on_quit=on_quit)
+    ui.set_tray(tray)
     lock = threading.Lock()
 
     # All mutable state in one dict - avoids nonlocal closure issues
