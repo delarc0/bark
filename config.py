@@ -31,7 +31,7 @@ DEFAULT_CONFIG = {
     "paste_delay": 0.15,
     "clipboard_mode": False,
     # Overlay
-    "dark_mode": False,
+    "dark_mode": True,
     "show_overlay": True,  # Pill overlay visible by default; hide via tray menu
     "overlay_x": None,
     "overlay_y": None,
