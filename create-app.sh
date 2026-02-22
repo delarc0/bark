@@ -72,8 +72,9 @@ export VIRTUAL_ENV="$DIR/.venv"
 export PATH="$DIR/.venv/bin:$PATH"
 unset PYTHONHOME
 
-# exec replaces this shell with Python so macOS sees the .app bundle
-# (not "Python") in permission dialogs and Dock
+# Tell macOS frameworks this process belongs to the Bark bundle
+export __CFBundleIdentifier=se.lab37.bark
+
 exec "$PYTHON" "$DIR/dictation.py"
 LAUNCHER
 
