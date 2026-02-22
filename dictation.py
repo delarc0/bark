@@ -15,13 +15,17 @@ if IS_WIN:
 
 # Setup logging first - writes to file so errors are visible even with pythonw.exe
 _dir = os.path.dirname(os.path.abspath(__file__))
+_log_handlers = [
+    logging.FileHandler(os.path.join(_dir, "dictation.log"), encoding="utf-8"),
+]
+# Only add StreamHandler when stdout is a real terminal (not redirected to log file
+# by Bark.app launcher, which would cause every line to appear twice).
+if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+    _log_handlers.append(logging.StreamHandler())
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler(os.path.join(_dir, "dictation.log"), encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
+    handlers=_log_handlers,
 )
 log = logging.getLogger(__name__)
 
@@ -94,7 +98,8 @@ def main():
             log.info(f"[{elapsed:.2f}s] {text}")
             ctx["hook"].type_text(text)
             beep_done()
-            ui.flash_transcript(text)
+            if cfg["streaming_preview"]:
+                ui.flash_transcript(text)
             append_history(text)
             ui.set_state("done")
         else:
@@ -232,7 +237,40 @@ def main():
         log.info("Shut down.")
 
 
+def _acquire_instance_lock():
+    """Prevent multiple Bark instances from running simultaneously.
+
+    Returns the lock file object (keep reference alive) or None if another
+    instance is already running.
+    """
+    lock_path = os.path.join(_dir, ".bark.lock")
+    try:
+        import fcntl
+        lock_file = open(lock_path, "w")
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        return lock_file
+    except (IOError, OSError):
+        return None
+    except ImportError:
+        # fcntl not available (Windows) — use msvcrt
+        try:
+            import msvcrt
+            lock_file = open(lock_path, "w")
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            lock_file.write(str(os.getpid()))
+            lock_file.flush()
+            return lock_file
+        except (IOError, OSError):
+            return None
+
+
 if __name__ == "__main__":
+    _lock = _acquire_instance_lock()
+    if _lock is None:
+        log.warning("Another Bark instance is already running. Exiting.")
+        sys.exit(0)
     try:
         main()
     except Exception:
