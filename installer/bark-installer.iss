@@ -4,7 +4,7 @@
 
 [Setup]
 AppName=Bark
-AppVersion=1.2.0
+AppVersion=1.2.1
 AppPublisher=LAB37
 AppPublisherURL=https://lab37.se
 DefaultDirName={localappdata}\Bark
