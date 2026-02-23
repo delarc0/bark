@@ -291,6 +291,11 @@ if errorlevel 1 (
 )
 echo.
 
+:: ── Write version marker (used by start.bat to detect updates) ──
+for /f "tokens=2 delims='" %%v in ('findstr /c:"\"version\"" config.py 2^>nul') do (
+    echo %%v> .setup-version
+)
+
 :: ── Done ────────────────────────────────────────────────────────
 if "!GPU_OK!"=="1" (
     echo   ========================================
