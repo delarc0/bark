@@ -63,11 +63,22 @@ class Transcriber:
             from faster_whisper import WhisperModel
             self._mlx = None
             log.info(f"Loading model '{MODEL_SIZE}' on {DEVICE} ({COMPUTE_TYPE})...")
-            self.model = WhisperModel(
-                MODEL_SIZE,
-                device=DEVICE,
-                compute_type=COMPUTE_TYPE,
-            )
+            try:
+                self.model = WhisperModel(
+                    MODEL_SIZE,
+                    device=DEVICE,
+                    compute_type=COMPUTE_TYPE,
+                )
+            except Exception as e:
+                if DEVICE == "cuda":
+                    log.warning(f"CUDA init failed: {e} - falling back to CPU")
+                    self.model = WhisperModel(
+                        MODEL_SIZE,
+                        device="cpu",
+                        compute_type="int8",
+                    )
+                else:
+                    raise
         log.info("Model loaded.")
 
     def transcribe(self, audio: np.ndarray) -> str:
