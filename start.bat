@@ -10,17 +10,10 @@ set NEED_SETUP=0
 if not exist ".venv\Scripts\pythonw.exe" set NEED_SETUP=1
 
 if "!NEED_SETUP!"=="0" (
-    :: Read installed version from .setup-version marker
     set SETUP_VER=
-    if exist ".setup-version" (
-        set /p SETUP_VER=<.setup-version
-    )
-    :: Read current app version from config.py
+    if exist ".setup-version" set /p SETUP_VER=<.setup-version
     set APP_VER=
-    for /f "tokens=2 delims='" %%v in ('findstr /c:"\"version\"" config.py 2^>nul') do (
-        set "APP_VER=%%v"
-    )
-    :: If versions don't match, re-run setup
+    if exist "VERSION" set /p APP_VER=<VERSION
     if "!SETUP_VER!" neq "!APP_VER!" set NEED_SETUP=1
 )
 
