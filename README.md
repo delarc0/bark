@@ -64,6 +64,17 @@ git pull
 ./setup-mac.sh
 ```
 
+The setup script detects your existing virtual environment and reuses it -- only new/changed packages are installed. Bark.app is rebuilt automatically.
+
+> **Coming from v1.0 or an old version?** If you have problems after updating, do a clean install:
+> ```bash
+> cd bark
+> git pull
+> rm -rf .venv Bark.app
+> ./setup-mac.sh
+> ```
+> Your settings (`bark_config.json`) and history (`bark_history.txt`) are preserved.
+
 ### Troubleshooting
 
 | Problem | Fix |
