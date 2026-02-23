@@ -1,5 +1,6 @@
 import logging
 import os
+import queue
 import threading
 
 from config import cfg, save_config, IS_WIN, IS_MAC
@@ -56,23 +57,21 @@ _tray_ref = None  # module-level ref for ObjC delegate
 
 if IS_MAC:
     try:
-        import objc
         from AppKit import (
             NSStatusBar,
             NSMenu,
             NSMenuItem,
             NSVariableStatusItemLength,
+            NSOnState,
+            NSOffState,
+            NSImage,
             NSFont,
             NSAttributedString,
             NSColor,
-            NSImage,
-            NSOnState,
-            NSOffState,
             NSForegroundColorAttributeName,
             NSFontAttributeName,
         )
-        from Foundation import NSSize
-        from Foundation import NSObject as _NSObj
+        from Foundation import NSObject as _NSObj, NSSize
 
         class _MenuTarget(_NSObj):
             """Receives NSMenuItem actions and dispatches to Python callbacks."""
@@ -125,12 +124,31 @@ class SystemTray:
         self._mac_target = None
         self._mac_delegate = None
         self._state = "loading"
+        # Queue for actions dispatched from ObjC callbacks (NSMenu).
+        # Calling _root.after() from inside an NSMenu modal loop crashes
+        # Tcl/Cocoa, so ObjC callbacks put work here and the main thread
+        # polls it safely via _poll_tray_actions().
+        self._action_queue = queue.Queue()
+
+    def _poll_tray_actions(self):
+        """Process queued tray menu actions on the main thread."""
+        try:
+            while True:
+                action = self._action_queue.get_nowait()
+                try:
+                    action()
+                except Exception as e:
+                    log.error(f"Tray action error: {e}")
+        except queue.Empty:
+            pass
+        self._overlay._root.after(50, self._poll_tray_actions)
 
     def start(self):
         if IS_MAC:
             if _APPKIT_OK:
                 log.info("Scheduling Mac menu bar setup on main thread...")
                 self._overlay._root.after(100, self._setup_mac_tray)
+                self._overlay._root.after(50, self._poll_tray_actions)
             else:
                 log.warning("Mac menu bar skipped (AppKit not available). "
                             "Install: pip install pyobjc-framework-Cocoa")
@@ -142,58 +160,11 @@ class SystemTray:
         self._state = state
         if IS_MAC and self._status_item:
             try:
-                self._overlay._root.after(0, self._update_mac_icon)
+                self._action_queue.put(self._update_mac_icon)
             except Exception:
                 pass
 
     # ================================================================ macOS NSStatusItem
-
-    @staticmethod
-    def _make_menubar_icon():
-        """Create a template-ready NSImage from icon.png.
-
-        Extracts the white dog silhouette from the app icon (white dog on dark
-        background) and returns it as a black-on-transparent image suitable for
-        macOS template rendering.
-        """
-        try:
-            from PIL import Image
-            import io
-
-            src_path = os.path.join(_dir, "icon.png")
-            if not os.path.exists(src_path):
-                log.warning(f"icon.png not found at {src_path}")
-                return None
-
-            img = Image.open(src_path).convert("RGBA")
-            # Resize to 36x36 (2x for Retina, displayed at 18x18)
-            img = img.resize((36, 36), Image.LANCZOS)
-
-            # Extract the bright (white dog) pixels as opaque black.
-            # Dark background pixels become transparent.
-            pixels = img.load()
-            for y in range(img.height):
-                for x in range(img.width):
-                    r, g, b, a = pixels[x, y]
-                    brightness = (r + g + b) / 3
-                    if brightness > 160:
-                        # Bright pixel (dog) → opaque black (template will recolor)
-                        pixels[x, y] = (0, 0, 0, 255)
-                    else:
-                        # Dark pixel (background) → transparent
-                        pixels[x, y] = (0, 0, 0, 0)
-
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            ns_data = buf.getvalue()
-
-            from AppKit import NSData
-            data = NSData.dataWithBytes_length_(ns_data, len(ns_data))
-            ns_img = NSImage.alloc().initWithData_(data)
-            return ns_img
-        except Exception as e:
-            log.warning(f"Failed to create menu bar icon: {e}")
-            return None
 
     def _setup_mac_tray(self):
         global _tray_ref
@@ -218,32 +189,42 @@ class SystemTray:
             self._mac_menu.setAutoenablesItems_(False)
             self._mac_menu.setDelegate_(self._mac_delegate)
 
-            # Build a menu bar template icon from icon.png.
-            # icon.png is a full app icon (dark bg + white dog) that blends into
-            # the dark menu bar. Extract the dog silhouette as a template image
-            # so macOS auto-colors it for light/dark mode.
-            self._mac_icon = None  # strong reference to prevent GC
-            icon_img = self._make_menubar_icon()
-            if icon_img:
-                icon_img.setTemplate_(True)
-                icon_img.setSize_(NSSize(18, 18))
-                btn.setImage_(icon_img)
-                self._mac_icon = icon_img
-                log.info("Menu bar icon: template image ready")
+            # Load Westie icon for menu bar
+            icon_path = os.path.join(_dir, "icon.png")
+            if os.path.exists(icon_path):
+                img = NSImage.alloc().initWithContentsOfFile_(icon_path)
+                if img:
+                    img.setSize_(NSSize(18, 18))
+                    img.setTemplate_(False)
+                    btn.setImage_(img)
+                    log.info("Menu bar icon: Westie image loaded")
             else:
-                btn.setTitle_("\U0001F415")  # 🐕 fallback
-                log.warning("Menu bar icon: using emoji fallback")
+                btn.setTitle_("\U0001F415")  # fallback emoji
 
             self._build_mac_menu()
             self._status_item.setMenu_(self._mac_menu)
             self._update_mac_icon()
 
             log.info(f"Mac menu bar icon ready. Button frame: {btn.frame()}")
+
+            # Hide Dock icon AFTER status item is created and rendered.
+            self._overlay._root.after(500, self._hide_dock_icon)
         except Exception as e:
             log.error(f"Failed to create menu bar icon: {e}", exc_info=True)
 
+    def _hide_dock_icon(self):
+        """Switch to Accessory policy to hide the Dock icon."""
+        try:
+            from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+            NSApplication.sharedApplication().setActivationPolicy_(
+                NSApplicationActivationPolicyAccessory
+            )
+            log.info("Dock icon hidden (Accessory policy, deferred).")
+        except Exception as e:
+            log.warning(f"Could not hide Dock icon: {e}")
+
     def _update_mac_icon(self):
-        """Update the colored status dot next to the dog icon."""
+        """Set the menu bar status dot color based on current state."""
         if not self._status_item:
             return
         btn = self._status_item.button()
@@ -261,14 +242,15 @@ class SystemTray:
             color = colors.get(self._state, NSColor.systemGreenColor())
             attrs = {
                 NSForegroundColorAttributeName: color,
-                NSFontAttributeName: NSFont.systemFontOfSize_(9),
+                NSFontAttributeName: NSFont.systemFontOfSize_(8),
             }
-            dot = NSAttributedString.alloc().initWithString_attributes_(
-                "\u25CF", attrs  # ● small colored dot
+            title = NSAttributedString.alloc().initWithString_attributes_(
+                "\u25CF", attrs  # ● solid circle
             )
-            btn.setAttributedTitle_(dot)
-        except Exception:
-            pass
+            btn.setAttributedTitle_(title)
+        except Exception as e:
+            log.warning(f"Attributed title failed, using plain dot: {e}")
+            btn.setTitle_("\u25CF")
 
     def _build_mac_menu(self):
         """Build the full menu. Called once at setup and rebuilt on refresh."""
@@ -276,21 +258,22 @@ class SystemTray:
         menu.removeAllItems()
         _mac_callbacks.clear()
 
-        # Register callbacks
-        _mac_callbacks[_TAG_OVERLAY] = lambda: self._overlay._root.after(
-            0, self._overlay._toggle_show_overlay
+        # Register callbacks — use the action queue on Mac so ObjC menu
+        # callbacks never touch Tcl directly (avoids reentrancy segfault).
+        _mac_callbacks[_TAG_OVERLAY] = lambda: self._action_queue.put(
+            self._overlay._toggle_show_overlay
         )
         _mac_callbacks[_TAG_SOUND] = self._toggle_sound
-        _mac_callbacks[_TAG_DARK] = lambda: self._overlay._root.after(
-            0, self._overlay._toggle_dark_mode
+        _mac_callbacks[_TAG_DARK] = lambda: self._action_queue.put(
+            self._overlay._toggle_dark_mode
         )
-        _mac_callbacks[_TAG_CLIP] = lambda: self._overlay._root.after(
-            0, self._overlay._toggle_clipboard_mode
+        _mac_callbacks[_TAG_CLIP] = lambda: self._action_queue.put(
+            self._overlay._toggle_clipboard_mode
         )
         _mac_callbacks[_TAG_STREAM] = self._toggle_streaming
         _mac_callbacks[_TAG_STARTUP] = self._toggle_startup
         _mac_callbacks[_TAG_HISTORY] = self._open_history
-        _mac_callbacks[_TAG_QUIT] = self._quit
+        _mac_callbacks[_TAG_QUIT] = lambda: self._action_queue.put(self._quit)
 
         # Show Overlay toggle
         self._add_item(menu, "Show Overlay", _TAG_OVERLAY, checked=cfg["show_overlay"])
@@ -547,8 +530,10 @@ class SystemTray:
         if self._icon:
             self._icon.stop()
         if IS_MAC:
+            # On Mac, _quit runs on the main thread via _action_queue,
+            # so we can call overlay.quit() directly (it touches Tcl).
             try:
-                self._overlay._root.after(0, self._overlay.quit)
+                self._overlay.quit()
             except Exception:
                 pass
 

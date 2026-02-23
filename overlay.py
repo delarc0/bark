@@ -228,31 +228,17 @@ class Overlay:
         else:
             self._root = tk.Tk()
             self.root = self._root
-            self.root.withdraw()  # Hide immediately to prevent flash
+            self.root.withdraw()  # Hide until first frame renders
             self.root.title("Bark")
             self.root.protocol("WM_DELETE_WINDOW", self.quit)
 
-            # Defer Dock icon hiding until after tray setup (at ~100ms)
-            def _hide_dock_icon():
-                try:
-                    from AppKit import NSApplication, NSApplicationActivationPolicyAccessory, NSImage
-                    app = NSApplication.sharedApplication()
-                    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-                    _icon_png = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
-                    if os.path.exists(_icon_png):
-                        ns_icon = NSImage.alloc().initWithContentsOfFile_(_icon_png)
-                        if ns_icon:
-                            app.setApplicationIconImage_(ns_icon)
-                    log.info("Dock icon hidden (Accessory policy).")
-                except Exception as e:
-                    log.warning(f"Could not hide Dock icon: {e}")
+            # Dock icon is hidden AFTER the NSStatusItem is created and
+            # rendered — see tray.py _setup_mac_tray(). Calling
+            # setActivationPolicy_(Accessory) before the status item
+            # exists prevents it from rendering.
 
-            self.root.after(300, _hide_dock_icon)
             self.root.overrideredirect(True)
             self.root.attributes("-topmost", True)
-            # macOS: per-pixel transparency so only the pill is visible.
-            # Tk's -transparent attribute is unreliable with overrideredirect,
-            # so we also configure the NSWindow directly via Cocoa (see below).
             self._transparent = False
             try:
                 self.root.attributes("-transparent", True)
@@ -284,6 +270,10 @@ class Overlay:
         else:
             x = (sw - DISPLAY_W) // 2
             y = sh - DISPLAY_H - 60
+        # Clamp to visible screen area (account for menu bar + Dock)
+        margin_top = 38 if IS_MAC else 0
+        x = max(0, min(x, sw - DISPLAY_W))
+        y = max(margin_top, min(y, sh - DISPLAY_H - 10))
         self.root.geometry(f"{DISPLAY_W}x{DISPLAY_H}+{x}+{y}")
 
         if IS_WIN:
@@ -349,6 +339,9 @@ class Overlay:
         self._phase = 0.0
         self._anim_job = None
         self._tooltip = None
+        self._tooltip_win = None   # Reusable tooltip Toplevel (created once)
+        self._tooltip_label = None
+        self._tooltip_dismiss_job = None
 
         # Smooth transition state
         self._bar_vis = 0.0    # 0=hidden, 1=visible (smooth fade)
@@ -443,7 +436,15 @@ class Overlay:
         if self._opacity < 0.01 and self._opacity_target == 0.0:
             self._opacity = 0.0
             self._visible = False
-            self.root.withdraw()
+            if IS_MAC:
+                # Mac: root == _root, so never withdraw (kills Cocoa CALayer
+                # state and crashes on deiconify). Just go fully transparent.
+                try:
+                    self.root.attributes("-alpha", 0.0)
+                except tk.TclError:
+                    pass
+            else:
+                self.root.withdraw()
             if self._anim_job:
                 self._root.after_cancel(self._anim_job)
                 self._anim_job = None
@@ -490,6 +491,7 @@ class Overlay:
         if IS_MAC and self._frame == 1 and self._visible and cfg["show_overlay"]:
             self._fix_mac_transparency()
             self.root.deiconify()
+            self._mac_deiconified = True
 
         self._anim_job = self._root.after(33, self._animate)
 
@@ -688,42 +690,57 @@ class Overlay:
     # ============================================================ tooltip
 
     def _show_tooltip(self, text, duration_ms=3000):
-        if self._tooltip:
-            try:
-                self._tooltip.destroy()
-            except Exception:
-                pass
-            self._tooltip = None
-
+        if not cfg["show_overlay"]:
+            return
         tip_bg = "#1A1C1E" if self._dark else "#F5F5F3"
         tip_fg = GREEN if self._dark else "#1A1C1E"
 
-        tip = tk.Toplevel(self._root)
-        tip.overrideredirect(True)
-        tip.attributes("-topmost", True)
-        tip.configure(bg=tip_bg)
+        # Reuse a single Toplevel to avoid focus stealing on macOS.
+        # Creating a new Toplevel activates the Tk app, which pulls
+        # focus away from the user's active text field.
+        if not self._tooltip_win or not self._tooltip_win.winfo_exists():
+            tip = tk.Toplevel(self._root)
+            tip.overrideredirect(True)
+            tip.attributes("-topmost", True)
+            tip.attributes("-alpha", 0.0)
+            tip.configure(bg=tip_bg)
+            lbl = tk.Label(
+                tip, text=text, font=(self._font, 8), fg=tip_fg, bg=tip_bg,
+            )
+            lbl.pack(padx=8, pady=4)
+            self._tooltip_win = tip
+            self._tooltip_label = lbl
+        else:
+            tip = self._tooltip_win
+            lbl = self._tooltip_label
+            tip.configure(bg=tip_bg)
+            lbl.configure(text=text, fg=tip_fg, bg=tip_bg)
 
-        lbl = tk.Label(
-            tip, text=text, font=(self._font, 8), fg=tip_fg, bg=tip_bg,
-        )
-        lbl.pack(padx=8, pady=4)
         tip.update_idletasks()
 
         tw = tip.winfo_reqwidth()
         ox = self.root.winfo_x() + (DISPLAY_W - tw) // 2
         oy = self.root.winfo_y() - _s(30)
         tip.geometry(f"+{ox}+{oy}")
-
-        self._tooltip = tip
-        self._root.after(duration_ms, lambda: self._dismiss_tooltip(tip))
-
-    def _dismiss_tooltip(self, tip):
-        if self._tooltip is tip:
-            self._tooltip = None
         try:
-            tip.destroy()
-        except Exception:
+            tip.attributes("-alpha", 1.0)
+        except tk.TclError:
             pass
+
+        # Cancel previous dismiss timer
+        if self._tooltip_dismiss_job:
+            self._root.after_cancel(self._tooltip_dismiss_job)
+        self._tooltip_dismiss_job = self._root.after(
+            duration_ms, self._dismiss_tooltip
+        )
+
+    def _dismiss_tooltip(self):
+        self._tooltip_dismiss_job = None
+        if self._tooltip_win and self._tooltip_win.winfo_exists():
+            try:
+                self._tooltip_win.attributes("-alpha", 0.0)
+            except tk.TclError:
+                pass
 
     # ============================================================ window mechanics
 
@@ -738,7 +755,12 @@ class Overlay:
             return
         try:
             from AppKit import NSApplication, NSColor
+            # Only style our Tk overlay window — NOT all windows.
+            # Styling all windows makes the NSStatusBarWindow (tray icon)
+            # invisible by applying transparency + corner masking to it.
             for window in NSApplication.sharedApplication().windows():
+                if window.title() != "Bark":
+                    continue
                 window.setOpaque_(False)
                 window.setBackgroundColor_(NSColor.clearColor())
                 window.setHasShadow_(True)
@@ -874,7 +896,17 @@ class Overlay:
             self._opacity = max(self._opacity, 0.01)
             if IS_MAC:
                 self._fix_mac_transparency()
-            self.root.deiconify()
+                # First show: window is still withdrawn from init — deiconify it.
+                # Subsequent shows: window is mapped but alpha=0 — just restore alpha.
+                if not getattr(self, "_mac_deiconified", False):
+                    self.root.deiconify()
+                    self._mac_deiconified = True
+                try:
+                    self.root.attributes("-alpha", 0.01)
+                except tk.TclError:
+                    pass
+            else:
+                self.root.deiconify()
             self.root.lift()
             if IS_WIN:
                 self.root.attributes("-topmost", True)
