@@ -44,7 +44,7 @@ DEFAULT_CONFIG = {
     "first_run": True,
     # Streaming preview
     "streaming_preview": False,
-    # Version
+    # Version (read from VERSION file, this is the fallback)
     "version": "1.2.1",
 }
 
@@ -81,6 +81,17 @@ def save_config(config=None):
 
 # Live config -- imported by all modules
 cfg = load_config()
+
+# Read version from VERSION file (single source of truth for batch scripts too)
+_version_file = os.path.join(_APP_DIR, "VERSION")
+if os.path.exists(_version_file):
+    try:
+        with open(_version_file, "r") as f:
+            _ver = f.read().strip()
+        if _ver:
+            cfg["version"] = _ver
+    except Exception:
+        pass
 
 # Platform-specific model constants (not user-configurable)
 if IS_MAC:

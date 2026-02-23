@@ -1,6 +1,7 @@
 import logging
 import os
 import queue
+import sys
 import threading
 
 from config import cfg, save_config, IS_WIN, IS_MAC
@@ -575,9 +576,9 @@ def _win_set_startup(enable: bool):
         if enable:
             # Use pythonw.exe to run without console window
             app_path = os.path.join(_dir, "dictation.py")
-            pythonw = os.path.join(os.path.dirname(os.sys.executable), "pythonw.exe")
+            pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
             if not os.path.exists(pythonw):
-                pythonw = os.sys.executable
+                pythonw = sys.executable
             winreg.SetValueEx(key, "Bark", 0, winreg.REG_SZ, f'"{pythonw}" "{app_path}"')
             log.info("Added Bark to Windows startup.")
         else:
@@ -597,7 +598,7 @@ def _mac_set_startup(enable: bool):
 
     if enable:
         app_path = os.path.join(_dir, "dictation.py")
-        python = os.sys.executable
+        python = sys.executable
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

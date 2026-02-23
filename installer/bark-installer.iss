@@ -40,6 +40,7 @@ Source: "..\history.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\version_check.py"; DestDir: "{app}"; Flags: ignoreversion
 ; Support files
 Source: "..\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\VERSION"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\start.bat"; DestDir: "{app}"; Flags: ignoreversion
 ; Setup script

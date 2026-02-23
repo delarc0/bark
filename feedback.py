@@ -10,7 +10,7 @@ from config import cfg, IS_MAC
 
 log = logging.getLogger(__name__)
 
-SAMPLE_RATE = 44100
+_BEEP_RATE = 44100
 
 
 def _make_samples(samples: list[float]) -> np.ndarray:
@@ -22,10 +22,10 @@ def _generate_rising_chirp(volume: float) -> np.ndarray:
     """Quick rising frequency sweep -- clearly 'starting', not a system click."""
     duration_ms = 80
     f_start, f_end = 480, 880
-    n = int(SAMPLE_RATE * duration_ms / 1000)
+    n = int(_BEEP_RATE * duration_ms / 1000)
     samples = []
     for i in range(n):
-        t = i / SAMPLE_RATE
+        t = i / _BEEP_RATE
         progress = i / n
         freq = f_start + (f_end - f_start) * progress
         env = math.sin(math.pi * progress)  # smooth fade in/out
@@ -38,10 +38,10 @@ def _generate_falling_boop(volume: float) -> np.ndarray:
     """Short descending tone -- a gentle 'done' that doesn't sound like a system click."""
     duration_ms = 100
     f_start, f_end = 660, 440
-    n = int(SAMPLE_RATE * duration_ms / 1000)
+    n = int(_BEEP_RATE * duration_ms / 1000)
     samples = []
     for i in range(n):
-        t = i / SAMPLE_RATE
+        t = i / _BEEP_RATE
         progress = i / n
         freq = f_start + (f_end - f_start) * progress
         env = 1.0 - progress  # linear fade out
@@ -61,7 +61,7 @@ def _save_wav(data: np.ndarray, path: str):
     with wave.open(path, "w") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
-        wf.setframerate(SAMPLE_RATE)
+        wf.setframerate(_BEEP_RATE)
         wf.writeframes(pcm.tobytes())
 
 
@@ -100,7 +100,7 @@ else:
 
     def _play_async(data: np.ndarray):
         try:
-            sd.play(data, samplerate=SAMPLE_RATE, blocking=False)
+            sd.play(data, samplerate=_BEEP_RATE, blocking=False)
         except Exception as e:
             log.warning(f"Beep failed: {e}")
 
