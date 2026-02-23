@@ -5,6 +5,3 @@ numpy>=1.24.0
 pyperclip>=1.8.2
 pystray>=0.19.5
 Pillow>=10.0.0
-torchaudio
-nvidia-cublas-cu12
-nvidia-cudnn-cu12
