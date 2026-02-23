@@ -24,7 +24,13 @@ def check_for_update():
         latest = data.get("tag_name", "").lstrip("v")
         current = cfg["version"]
         if latest and latest != current:
-            return latest
+            try:
+                lv = tuple(int(x) for x in latest.split("."))
+                cv = tuple(int(x) for x in current.split("."))
+                if lv > cv:
+                    return latest
+            except (ValueError, TypeError):
+                return latest
     except Exception as e:
         log.debug(f"Version check failed: {e}")
     return None
