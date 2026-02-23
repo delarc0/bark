@@ -11,19 +11,50 @@ echo.
 :: ── Step 1: Check NVIDIA GPU ──────────────────────────────────────
 echo [1/5] Checking NVIDIA GPU...
 set GPU_OK=0
+set GPU_NAME=
+
+:: Method 1: Try nvidia-smi (available if NVIDIA drivers installed from nvidia.com)
 for /f "tokens=*" %%g in ('nvidia-smi --query-gpu=name --format^=csv^,noheader 2^>nul') do (
-    echo   Found: %%g
+    set "GPU_NAME=%%g"
     set GPU_OK=1
 )
+
+:: Method 2: Try nvidia-smi from known install paths
 if "!GPU_OK!"=="0" (
+    for %%p in (
+        "C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+        "C:\Windows\System32\nvidia-smi.exe"
+    ) do (
+        if exist %%p (
+            for /f "tokens=*" %%g in ('%%p --query-gpu=name --format^=csv^,noheader 2^>nul') do (
+                set "GPU_NAME=%%g"
+                set GPU_OK=1
+            )
+        )
+    )
+)
+
+:: Method 3: Fall back to WMI (works even without nvidia-smi in PATH)
+if "!GPU_OK!"=="0" (
+    for /f "tokens=*" %%g in ('wmic path win32_VideoController where "name like '%%NVIDIA%%'" get name /value 2^>nul ^| findstr /i "NVIDIA"') do (
+        set "GPU_NAME=%%g"
+        set GPU_OK=1
+    )
+)
+
+if "!GPU_OK!"=="1" (
+    echo   Found: !GPU_NAME!
+) else (
     echo.
-    echo   ERROR: NVIDIA GPU not detected.
-    echo   Bark requires an NVIDIA GPU with CUDA support.
-    echo   Make sure NVIDIA drivers are installed:
+    echo   WARNING: NVIDIA GPU not detected.
+    echo   Bark works best with an NVIDIA GPU ^(CUDA^), but will
+    echo   fall back to CPU mode if needed ^(slower transcription^).
+    echo.
+    echo   If you DO have an NVIDIA GPU, install drivers from:
     echo   https://www.nvidia.com/drivers
     echo.
-    pause
-    exit /b 1
+    choice /c YN /m "  Continue with CPU-only setup?"
+    if errorlevel 2 exit /b 1
 )
 echo.
 

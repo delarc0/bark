@@ -89,8 +89,20 @@ if IS_MAC:
     COMPUTE_TYPE = None
 else:
     MODEL_SIZE = "deepdml/faster-whisper-large-v3-turbo-ct2"
-    DEVICE = "cuda"
-    COMPUTE_TYPE = "float16"
+    # Detect CUDA at runtime - fall back to CPU if unavailable
+    try:
+        import torch
+        _cuda_ok = torch.cuda.is_available()
+    except Exception:
+        _cuda_ok = False
+    if _cuda_ok:
+        DEVICE = "cuda"
+        COMPUTE_TYPE = "float16"
+        log.info(f"CUDA available: {torch.cuda.get_device_name(0)}")
+    else:
+        DEVICE = "cpu"
+        COMPUTE_TYPE = "int8"
+        log.warning("CUDA not available - using CPU mode (slower transcription)")
 
 # Virtual key codes (platform-fixed)
 if IS_WIN:
