@@ -774,11 +774,12 @@ class Overlay:
             log.warning(f"Cocoa styling failed: {e}")
 
     def _keep_on_top(self):
-        try:
-            self.root.lift()
-            self.root.attributes("-topmost", True)
-        except Exception:
-            pass
+        if self._visible:
+            try:
+                self.root.lift()
+                self.root.attributes("-topmost", True)
+            except Exception:
+                pass
         self._root.after(3000, self._keep_on_top)
 
     def _enable_refocus(self):

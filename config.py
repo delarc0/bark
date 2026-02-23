@@ -64,6 +64,7 @@ def load_config() -> dict:
 def save_config(config=None):
     if config is None:
         config = cfg
+    tmp = None
     try:
         fd, tmp = tempfile.mkstemp(
             dir=os.path.dirname(CONFIG_PATH), suffix=".tmp"
@@ -73,10 +74,11 @@ def save_config(config=None):
         os.replace(tmp, CONFIG_PATH)
     except Exception as e:
         log.warning(f"Failed to save config: {e}")
-        try:
-            os.unlink(tmp)
-        except Exception:
-            pass
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
 
 
 # Live config -- imported by all modules

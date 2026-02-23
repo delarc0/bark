@@ -211,22 +211,32 @@ if "!VCRT_OK!"=="1" (
 echo.
 
 :: ── Step 4: Create virtual environment ──────────────────────────
-echo [4/6] Creating virtual environment...
-if exist ".venv" (
-    echo   Removing existing venv...
-    rmdir /s /q ".venv"
+echo [4/6] Checking virtual environment...
+set VENV_OK=0
+if exist ".venv\Scripts\python.exe" (
+    .venv\Scripts\python.exe -c "import sys; sys.exit(0)" >nul 2>&1
+    if not errorlevel 1 set VENV_OK=1
 )
-!PYTHON! -m venv .venv
-if errorlevel 1 (
-    echo.
-    echo   ERROR: Failed to create virtual environment.
-    echo   Try running this script as Administrator, or check
-    echo   that your antivirus isn't blocking Python.
-    echo.
-    pause
-    exit /b 1
+if "!VENV_OK!"=="1" (
+    echo   Existing venv OK - reusing.
+) else (
+    echo   Creating virtual environment...
+    if exist ".venv" (
+        echo   Removing broken venv...
+        rmdir /s /q ".venv"
+    )
+    !PYTHON! -m venv .venv
+    if errorlevel 1 (
+        echo.
+        echo   ERROR: Failed to create virtual environment.
+        echo   Try running this script as Administrator, or check
+        echo   that your antivirus isn't blocking Python.
+        echo.
+        pause
+        exit /b 1
+    )
+    echo   venv created.
 )
-echo   venv created.
 echo.
 
 :: ── Step 5: Install PyTorch ─────────────────────────────────────
@@ -235,18 +245,18 @@ if "!GPU_OK!"=="1" (
     echo [5/6] Installing PyTorch with CUDA support...
     echo   (This may take several minutes - ~2.5 GB download)
     echo.
-    .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+    .venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cu121
     if errorlevel 1 (
         echo.
         echo   CUDA PyTorch failed. Trying CPU-only version...
         echo.
-        .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+        .venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cpu
     )
 ) else (
     echo [5/6] Installing PyTorch ^(CPU-only^)...
     echo   (This may take a few minutes)
     echo.
-    .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    .venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cpu
 )
 if errorlevel 1 (
     echo.
