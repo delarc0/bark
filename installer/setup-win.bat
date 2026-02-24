@@ -1,6 +1,21 @@
 @echo off
 setlocal EnableDelayedExpansion
+
+:: Navigate to project root (where dictation.py lives)
+:: Works whether run from project root (Inno install) or installer/ subdir (git clone)
 cd /d "%~dp0"
+if not exist "dictation.py" (
+    if exist "..\dictation.py" (
+        cd /d "%~dp0.."
+    ) else (
+        echo.
+        echo   ERROR: Cannot find Bark project files.
+        echo   Run this script from the Bark directory.
+        echo.
+        pause
+        exit /b 1
+    )
+)
 
 echo.
 echo   ==============================
@@ -22,9 +37,8 @@ if "%PROCESSOR_ARCHITECTURE%"=="x86" (
 )
 
 :: Check disk space (~5 GB needed for venv + model)
-for /f "tokens=3" %%a in ('dir /-c "%~dp0" 2^>nul ^| findstr /c:"bytes free"') do set FREE_BYTES=%%a
+for /f "tokens=3" %%a in ('dir /-c "%cd%" 2^>nul ^| findstr /c:"bytes free"') do set FREE_BYTES=%%a
 set FREE_BYTES=!FREE_BYTES:,=!
-:: Simple check: if free space string is less than 10 chars, likely under 5GB
 if defined FREE_BYTES (
     set "FB=!FREE_BYTES!"
     :: 5 GB = 5368709120 bytes (10 digits). Less than 10 digits = under ~1GB
@@ -57,82 +71,113 @@ if errorlevel 1 (
 echo   OK
 echo.
 
-:: ── Step 1: Check NVIDIA GPU ──────────────────────────────────────
-echo [1/6] Checking NVIDIA GPU...
+:: ── Step 1: Detect NVIDIA GPU ───────────────────────────────────
+echo [1/7] Detecting NVIDIA GPU...
 set GPU_OK=0
 set GPU_NAME=
+set NVIDIA_SMI=
 
-:: Method 1: Try nvidia-smi (available if NVIDIA drivers installed from nvidia.com)
-for /f "tokens=*" %%g in ('nvidia-smi --query-gpu=name --format^=csv^,noheader 2^>nul') do (
-    set "GPU_NAME=%%g"
-    set GPU_OK=1
+:: Locate nvidia-smi executable
+where nvidia-smi >nul 2>nul && set "NVIDIA_SMI=nvidia-smi"
+if not defined NVIDIA_SMI (
+    for %%p in (
+        "%SystemRoot%\System32\nvidia-smi.exe"
+        "%ProgramFiles%\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+        "%ProgramW6432%\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+        "%SystemRoot%\SysWOW64\nvidia-smi.exe"
+    ) do (
+        if not defined NVIDIA_SMI if exist "%%~p" set "NVIDIA_SMI=%%~p"
+    )
 )
 
-:: Method 2: Try nvidia-smi from known install paths
-if "!GPU_OK!"=="0" (
-    for %%p in (
-        "C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
-        "C:\Windows\System32\nvidia-smi.exe"
-    ) do (
-        if exist %%p (
-            for /f "tokens=*" %%g in ('%%p --query-gpu=name --format^=csv^,noheader 2^>nul') do (
+:: Method 1: nvidia-smi (best source - exact GPU name + driver version)
+if defined NVIDIA_SMI (
+    "!NVIDIA_SMI!" --query-gpu=name --format=csv,noheader > "%TEMP%\bark_gpu.txt" 2>nul
+    if exist "%TEMP%\bark_gpu.txt" (
+        for /f "usebackq delims=" %%g in ("%TEMP%\bark_gpu.txt") do (
+            if not "%%g"=="" (
                 set "GPU_NAME=%%g"
                 set GPU_OK=1
             )
         )
+        del "%TEMP%\bark_gpu.txt" 2>nul
     )
-)
-
-:: Method 3: Fall back to WMI (works even without nvidia-smi in PATH)
-if "!GPU_OK!"=="0" (
-    for /f "tokens=*" %%g in ('wmic path win32_VideoController where "name like '%%NVIDIA%%'" get name /value 2^>nul ^| findstr /i "NVIDIA"') do (
-        set "GPU_NAME=%%g"
-        set GPU_OK=1
-    )
-)
-
-if "!GPU_OK!"=="1" (
-    echo   Found: !GPU_NAME!
-    :: Check NVIDIA driver version (CUDA 12.1 needs driver 525+)
-    for /f "tokens=*" %%v in ('nvidia-smi --query-gpu=driver_version --format^=csv^,noheader 2^>nul') do (
-        echo   Driver: %%v
-        for /f "tokens=1 delims=." %%m in ("%%v") do (
-            if %%m LSS 525 (
-                echo.
-                echo   WARNING: Driver version %%v may be too old for CUDA 12.
-                echo   Update from: https://www.nvidia.com/drivers
-                echo   Falling back to CPU mode for now.
-                set GPU_OK=0
+    if "!GPU_OK!"=="1" (
+        echo   Found: !GPU_NAME!
+        "!NVIDIA_SMI!" --query-gpu=driver_version --format=csv,noheader > "%TEMP%\bark_drv.txt" 2>nul
+        if exist "%TEMP%\bark_drv.txt" (
+            for /f "usebackq delims=" %%v in ("%TEMP%\bark_drv.txt") do (
+                if not "%%v"=="" echo   Driver: %%v
             )
+            del "%TEMP%\bark_drv.txt" 2>nul
         )
     )
+)
+
+:: Method 2: PowerShell Get-CimInstance (reliable fallback, works without nvidia-smi)
+:: This queries the Windows device manager directly - works on all Windows 10+
+if "!GPU_OK!"=="0" (
+    if defined NVIDIA_SMI (
+        echo   nvidia-smi found but could not query GPU.
+    ) else (
+        echo   nvidia-smi not found.
+    )
+    echo   Checking via Windows device manager...
+    powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Where-Object {$_.Name -like '*NVIDIA*'} | Select-Object -First 1 -ExpandProperty Name" > "%TEMP%\bark_gpu.txt" 2>nul
+    if exist "%TEMP%\bark_gpu.txt" (
+        for /f "usebackq delims=" %%g in ("%TEMP%\bark_gpu.txt") do (
+            if not "%%g"=="" (
+                set "GPU_NAME=%%g"
+                set GPU_OK=1
+            )
+        )
+        del "%TEMP%\bark_gpu.txt" 2>nul
+    )
+    if "!GPU_OK!"=="1" (
+        echo   Found: !GPU_NAME!
+        :: Also get driver version
+        powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Where-Object {$_.Name -like '*NVIDIA*'} | Select-Object -First 1 -ExpandProperty DriverVersion" > "%TEMP%\bark_drv.txt" 2>nul
+        if exist "%TEMP%\bark_drv.txt" (
+            for /f "usebackq delims=" %%v in ("%TEMP%\bark_drv.txt") do (
+                if not "%%v"=="" echo   Driver: %%v
+            )
+            del "%TEMP%\bark_drv.txt" 2>nul
+        )
+    )
+)
+
+:: Report GPU detection result
+if "!GPU_OK!"=="1" (
+    echo   CUDA acceleration will be enabled.
 ) else (
     echo.
-    echo   WARNING: NVIDIA GPU not detected.
-    echo   Bark works best with an NVIDIA GPU ^(CUDA^), but will
-    echo   fall back to CPU mode if needed ^(slower transcription^).
+    echo   No NVIDIA GPU detected.
     echo.
-    echo   If you DO have an NVIDIA GPU, install drivers from:
-    echo   https://www.nvidia.com/drivers
+    echo   Bark works best with an NVIDIA GPU ^(CUDA^) but will
+    echo   fall back to CPU mode ^(slower transcription^).
+    echo.
+    echo   If you DO have an NVIDIA GPU:
+    echo   1. Install or update drivers from https://www.nvidia.com/drivers
+    echo   2. Re-run this setup script afterward
     echo.
     choice /c YN /m "  Continue with CPU-only setup?"
     if errorlevel 2 exit /b 1
 )
 echo.
 
-:: ── Step 2: Check/Install Python ──────────────────────────────────
-echo [2/6] Checking Python 3.11+...
+:: ── Step 2: Check/Install Python ────────────────────────────────
+echo [2/7] Checking Python 3.11+...
 
 set PYTHON=
 set PYVER=
 set PY_MAJOR=0
 set PY_MINOR=0
 
-:: Check if python is available
+:: Check if python is available and not the Windows Store stub
 where python >nul 2>&1
 if errorlevel 1 goto :install_python
 
-:: Make sure it's real Python, not the Windows Store stub
+:: Make sure it's real Python, not the Windows Store redirect
 python -c "import sys; sys.exit(0)" >nul 2>&1
 if errorlevel 1 goto :install_python
 
@@ -174,7 +219,7 @@ if errorlevel 1 (
     echo.
     echo   Python was installed but is not in PATH yet.
     echo   Please close this window and re-run setup-win.bat
-    echo   (or restart your computer).
+    echo   ^(or restart your computer^).
     echo.
     pause
     exit /b 1
@@ -186,7 +231,7 @@ for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do echo   Installe
 echo.
 
 :: ── Step 3: Check Visual C++ Runtime ────────────────────────────
-echo [3/6] Checking Visual C++ Runtime...
+echo [3/7] Checking Visual C++ Runtime...
 set VCRT_OK=0
 reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" /v Version >nul 2>&1
 if not errorlevel 1 set VCRT_OK=1
@@ -211,7 +256,7 @@ if "!VCRT_OK!"=="1" (
 echo.
 
 :: ── Step 4: Create virtual environment ──────────────────────────
-echo [4/6] Checking virtual environment...
+echo [4/7] Checking virtual environment...
 set VENV_OK=0
 if exist ".venv\Scripts\python.exe" (
     .venv\Scripts\python.exe -c "import sys; sys.exit(0)" >nul 2>&1
@@ -235,26 +280,26 @@ if "!VENV_OK!"=="1" (
         pause
         exit /b 1
     )
-    echo   venv created.
+    echo   Created.
 )
 echo.
 
 :: ── Step 5: Install PyTorch ─────────────────────────────────────
 .venv\Scripts\pip.exe install --upgrade pip --quiet 2>nul
 if "!GPU_OK!"=="1" (
-    echo [5/6] Installing PyTorch with CUDA support...
-    echo   (This may take several minutes - ~2.5 GB download)
+    echo [5/7] Installing PyTorch with CUDA support...
+    echo   ^(This may take several minutes - ~2.5 GB download^)
     echo.
     .venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cu121
     if errorlevel 1 (
         echo.
-        echo   CUDA PyTorch failed. Trying CPU-only version...
+        echo   CUDA PyTorch install failed. Trying CPU-only version...
         echo.
         .venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cpu
     )
 ) else (
-    echo [5/6] Installing PyTorch ^(CPU-only^)...
-    echo   (This may take a few minutes)
+    echo [5/7] Installing PyTorch ^(CPU-only^)...
+    echo   ^(This may take a few minutes^)
     echo.
     .venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cpu
 )
@@ -271,7 +316,7 @@ if errorlevel 1 (
 echo.
 
 :: ── Step 6: Install remaining dependencies ──────────────────────
-echo [6/6] Installing dependencies...
+echo [6/7] Installing dependencies...
 .venv\Scripts\pip.exe install -r requirements.txt
 if errorlevel 1 (
     echo.
@@ -282,22 +327,40 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+:: CUDA libraries for faster-whisper (ctranslate2 needs these to find CUDA DLLs)
 if "!GPU_OK!"=="1" (
+    echo   Installing CUDA libraries for Whisper...
     .venv\Scripts\pip.exe install nvidia-cublas-cu12 nvidia-cudnn-cu12 --quiet
 )
 echo.
 
-:: ── Verify installation ─────────────────────────────────────────
-echo   Verifying installation...
-.venv\Scripts\python.exe -c "import faster_whisper; import sounddevice; import pynput; print('OK')" 2>nul
+:: ── Step 7: Verify installation ─────────────────────────────────
+echo [7/7] Verifying installation...
+echo.
+
+:: Check core package imports
+.venv\Scripts\python.exe -c "import faster_whisper; import sounddevice; import pynput; print('  Core packages: OK')" 2>nul
 if errorlevel 1 (
-    echo.
-    echo   WARNING: Some packages may not have installed correctly.
-    echo   Bark might still work - try launching it.
-    echo   If it crashes, check dictation.log for details.
-    echo.
-) else (
-    echo   All dependencies verified.
+    echo   WARNING: Some core packages may not have installed correctly.
+    echo   Bark might still work. Check dictation.log if it crashes.
+)
+
+:: Check CUDA status from Python (the real test)
+.venv\Scripts\python.exe -c "import torch; c=torch.cuda.is_available(); print('  CUDA: YES - '+torch.cuda.get_device_name(0) if c else '  CUDA: NO (CPU mode)')" 2>nul
+if errorlevel 1 (
+    echo   WARNING: Could not verify PyTorch installation.
+)
+
+:: Warn if GPU was detected in step 1 but CUDA isn't working in Python
+if "!GPU_OK!"=="1" (
+    .venv\Scripts\python.exe -c "import torch; exit(0 if torch.cuda.is_available() else 1)" >nul 2>&1
+    if errorlevel 1 (
+        echo.
+        echo   NOTE: NVIDIA GPU was detected but CUDA is not available in Python.
+        echo   This usually means the NVIDIA driver needs updating.
+        echo   Update from: https://www.nvidia.com/drivers
+        echo   Bark will still work in CPU mode ^(slower transcription^).
+    )
 )
 echo.
 
@@ -322,7 +385,7 @@ echo     - Desktop shortcut
 echo     - Start Menu ^> Bark
 echo.
 echo     First launch: the Whisper model
-echo     downloads automatically (~1.5 GB).
+echo     downloads automatically ^(~1.5 GB^).
 echo   ========================================
 echo.
 pause
