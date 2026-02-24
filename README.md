@@ -13,6 +13,7 @@ Hold a key, speak, release. Text appears wherever your cursor is. No cloud, no A
 - **Fast** - ~0.2s on RTX 4090 (CUDA), ~0.5s on Apple Silicon (MLX Metal)
 - **Clean output** - Strips filler words, detects Whisper hallucinations
 - **Visual overlay** - Floating status bar with live waveform during recording
+- **System tray** - Full settings menu from the system tray icon (Windows) or menu bar (Mac)
 - **Audio feedback** - Subtle terminal-style blips on start/done
 - **Clipboard paste** - Works in any app (restores clipboard after)
 - **Cross-platform** - Windows and macOS
@@ -54,7 +55,7 @@ If the overlay doesn't appear after granting permissions, quit and relaunch.
 3. Speak -- the overlay shows a waveform animation
 4. **Release** to transcribe, or just stop talking (auto-stop after 1.5s of silence)
 5. Transcribed text is pasted at your cursor position
-6. **Right-click** the overlay to quit
+6. **Right-click** the overlay or the **menu bar icon** to access settings or quit
 
 ### Updating
 
@@ -109,48 +110,72 @@ Important: use `/opt/homebrew/bin/python3`, not the system `/usr/bin/python3` (t
 ### Requirements
 
 - Windows 10/11
-- NVIDIA GPU with CUDA support (tested on RTX 4090)
+- NVIDIA GPU with CUDA support (recommended) or CPU-only mode
 - Python 3.11+
-- NVIDIA drivers (CUDA 12.x)
+- NVIDIA drivers with CUDA 12.x (for GPU mode)
 
-### Setup
+### Install (recommended)
+
+Download and run the installer from the [latest release](https://github.com/delarc0/bark/releases/latest). It handles Python environment setup, CUDA detection, and creates Start Menu + Desktop shortcuts.
+
+After install, search **"Bark"** in the Start Menu or use the Desktop shortcut.
+
+### Install (manual)
 
 ```bash
 git clone https://github.com/delarc0/bark.git
 cd bark
+installer\setup-win.bat
+```
 
+The setup script creates a virtual environment, detects your GPU, installs PyTorch (CUDA or CPU), and launches Bark when done.
+
+<details>
+<summary>Fully manual setup</summary>
+
+```bash
+git clone https://github.com/delarc0/bark.git
+cd bark
 python -m venv .venv
 .venv\Scripts\activate
 
-# PyTorch with CUDA (required for Silero VAD)
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+# PyTorch with CUDA
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 pip install -r requirements.txt
 ```
 
+Launch: `.venv\Scripts\pythonw.exe dictation.py` or use `launch.vbs` for silent startup.
+
+</details>
+
+### First launch
+
+1. The Whisper model downloads automatically (~1.5 GB, cached after first time)
+2. A small green overlay appears near the bottom of your screen
+3. Bark appears in your **system tray** (notification area) with a menu for all settings
+
 ### Usage
 
-```bash
-.venv\Scripts\python dictation.py    # With console
-.venv\Scripts\pythonw dictation.py   # Without console
-start.bat                            # Double-click launcher
-```
-
-1. A small green overlay appears at the bottom center of your screen
-2. **Hold Caps Lock** to record (Caps Lock is suppressed, won't toggle)
-3. Speak -- the overlay shows a waveform animation
-4. **Release** to transcribe, or just stop talking (auto-stop after 1.5s of silence)
-5. Transcribed text is pasted at your cursor position
-6. **Right-click** the overlay to quit
+1. **Hold Caps Lock** to record (Caps Lock is suppressed, won't toggle)
+2. Speak -- the overlay shows a waveform animation
+3. **Release** to transcribe, or just stop talking (auto-stop after 1.5s of silence)
+4. Transcribed text appears at your cursor position
+5. **Right-click** the overlay or the **system tray icon** to access settings (language, trigger key, dark mode, etc.)
 
 ### Updating
+
+If installed via installer, download the latest release and run the installer again.
+
+If installed via git:
 
 ```bash
 cd bark
 git pull
-.venv\Scripts\activate
-pip install -r requirements.txt
+installer\setup-win.bat
 ```
+
+The setup script detects your existing environment and only updates what changed.
 
 ---
 
