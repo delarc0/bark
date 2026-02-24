@@ -24,6 +24,11 @@ if "!NEED_SETUP!"=="1" (
         call "%~dp0setup-win.bat"
     ) else if exist "%~dp0installer\setup-win.bat" (
         call "%~dp0installer\setup-win.bat"
+    ) else (
+        echo ERROR: setup-win.bat not found.
+        echo Re-download Bark from https://github.com/delarc0/bark
+        pause
+        exit /b 1
     )
     if not exist ".venv\Scripts\pythonw.exe" (
         echo ERROR: Setup failed. See errors above.

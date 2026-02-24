@@ -51,7 +51,7 @@ Name: "{group}\Bark"; Filename: "{app}\start.bat"; IconFilename: "{app}\icon.ico
 Name: "{autodesktop}\Bark"; Filename: "{app}\start.bat"; IconFilename: "{app}\icon.ico"; WorkingDir: "{app}"; Tasks: desktopicon; AppUserModelID: "lab37.bark"
 
 [Run]
-Filename: "cmd.exe"; Parameters: "/k ""{app}\setup-win.bat"""; WorkingDir: "{app}"; Description: "Set up Python environment (required)"; Flags: postinstall nowait
+Filename: "cmd.exe"; Parameters: "/c ""{app}\setup-win.bat"""; WorkingDir: "{app}"; Description: "Set up Python environment (required)"; Flags: postinstall nowait
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.venv"
