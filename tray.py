@@ -119,8 +119,10 @@ class SystemTray:
     def __init__(self, overlay, on_quit=None):
         self._overlay = overlay
         self._on_quit = on_quit
-        self._icon = None  # pystray Icon (Windows)
+        self._icon = None  # pystray Icon (unused on Windows now)
         self._status_item = None  # NSStatusItem (Mac)
+        self._win32_hwnd = None   # HWND for Win32 tray (Windows)
+        self._win32_nid = None    # NOTIFYICONDATAW (Windows)
         self._mac_menu = None
         self._mac_target = None
         self._mac_delegate = None
@@ -355,109 +357,296 @@ class SystemTray:
         """Called by delegate when menu is about to open. Rebuild for fresh state."""
         self._build_mac_menu()
 
-    # ================================================================ Windows pystray
+    # ================================================================ Windows Win32 tray
 
     def _run(self):
-        try:
-            import pystray
-            from PIL import Image
-        except ImportError as e:
-            log.warning(f"System tray not available (missing pystray/Pillow): {e}")
-            return
+        """Windows tray icon via direct Win32 Shell_NotifyIconW.
 
+        Bypasses pystray entirely -- ExtractIconW loads the ICO reliably
+        (proven by the taskbar icon fix) whereas pystray's PIL-to-HICON
+        conversion fails silently on some Windows 11 setups.
+        """
         try:
-            image = Image.open(ICON_PATH)
+            self._run_win32()
         except Exception as e:
-            log.warning(f"Failed to load tray icon: {e}")
-            image = Image.new("RGB", (64, 64), "#42FC93")
+            log.error(f"Win32 tray thread crashed: {e}", exc_info=True)
 
-        trigger_keys = TRIGGER_KEYS_WIN if IS_WIN else TRIGGER_KEYS_MAC
-        trigger_cfg_key = "trigger_key_win" if IS_WIN else "trigger_key_mac"
+    def _run_win32(self):
+        import ctypes
+        import ctypes.wintypes as wt
 
-        menu = pystray.Menu(
-            pystray.MenuItem(
-                "Show/Hide Overlay",
-                self._toggle_overlay,
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                lambda item: f"Mode: {'Clipboard' if cfg['clipboard_mode'] else 'Type'}",
-                self._toggle_clipboard,
-            ),
-            pystray.MenuItem(
-                lambda item: f"Sound: {'ON' if cfg['sound_enabled'] else 'OFF'}",
-                self._toggle_sound,
-            ),
-            pystray.MenuItem(
-                lambda item: f"Dark Mode: {'ON' if cfg['dark_mode'] else 'OFF'}",
-                self._toggle_dark_mode,
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                "Language",
-                pystray.Menu(
-                    *[
-                        pystray.MenuItem(
-                            name,
-                            self._make_language_handler(code),
-                            checked=lambda item, c=code: cfg["language"] == c,
-                            radio=True,
-                        )
-                        for code, name in LANGUAGES_TOP
-                    ],
-                    pystray.MenuItem(
-                        "Others",
-                        pystray.Menu(
-                            *[
-                                pystray.MenuItem(
-                                    name,
-                                    self._make_language_handler(code),
-                                    checked=lambda item, c=code: cfg["language"] == c,
-                                    radio=True,
-                                )
-                                for code, name in LANGUAGES_OTHER
-                            ]
-                        ),
-                    ),
-                ),
-            ),
-            pystray.MenuItem(
-                "Trigger Key",
-                pystray.Menu(
-                    *[
-                        pystray.MenuItem(
-                            name,
-                            self._make_trigger_handler(code, trigger_cfg_key),
-                            checked=lambda item, c=code: cfg[trigger_cfg_key] == c,
-                            radio=True,
-                        )
-                        for code, name in trigger_keys
-                    ]
-                ),
-            ),
-            pystray.MenuItem(
-                lambda item: f"Streaming Preview: {'ON' if cfg['streaming_preview'] else 'OFF'}",
-                self._toggle_streaming,
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                lambda item: f"Start on Login: {'ON' if cfg['start_on_login'] else 'OFF'}",
-                self._toggle_startup,
-            ),
-            pystray.MenuItem(
-                "History",
-                self._open_history,
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                "Quit",
-                self._quit,
-            ),
+        _user32 = ctypes.windll.user32
+        _shell32 = ctypes.windll.shell32
+        _kernel32 = ctypes.windll.kernel32
+        _gdi32 = ctypes.windll.gdi32
+
+        # ---- Win32 constants ----
+        WM_USER = 0x0400
+        WM_TRAYICON = WM_USER + 20
+        WM_DESTROY = 0x0002
+        WM_COMMAND = 0x0111
+        WM_RBUTTONUP = 0x0205
+        WM_LBUTTONUP = 0x0202
+
+        NIM_ADD = 0x00
+        NIM_MODIFY = 0x01
+        NIM_DELETE = 0x02
+        NIF_MESSAGE = 0x01
+        NIF_ICON = 0x02
+        NIF_TIP = 0x04
+        NIF_INFO = 0x10
+
+        MF_STRING = 0x0000
+        MF_SEPARATOR = 0x0800
+        MF_POPUP = 0x0010
+        MF_CHECKED = 0x0008
+
+        TPM_LEFTBUTTON = 0x0000
+        TPM_RETURNCMD = 0x0100
+        TPM_NONOTIFY = 0x0080
+
+        MIM_BACKGROUND = 0x00000002
+        MIM_APPLYTOSUBMENUS = 0x80000000
+
+        class MENUINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wt.DWORD),
+                ("fMask", wt.DWORD),
+                ("dwStyle", wt.DWORD),
+                ("cyMax", wt.UINT),
+                ("hbrBack", wt.HBRUSH),
+                ("dwContextHelpID", wt.DWORD),
+                ("dwMenuData", ctypes.POINTER(wt.ULONG)),
+            ]
+
+        # Light background brush so black text is readable (COLORREF = 0x00BBGGRR)
+        _menu_brush = _gdi32.CreateSolidBrush(0x00F0F0F0)  # RGB(240,240,240)
+
+        def _apply_menu_bg(hmenu):
+            mi = MENUINFO()
+            mi.cbSize = ctypes.sizeof(MENUINFO)
+            mi.fMask = MIM_BACKGROUND | MIM_APPLYTOSUBMENUS
+            mi.hbrBack = _menu_brush
+            _user32.SetMenuInfo(hmenu, ctypes.byref(mi))
+
+        # ---- NOTIFYICONDATAW ----
+        WCHAR = ctypes.c_wchar
+
+        class NOTIFYICONDATAW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wt.DWORD),
+                ("hWnd", wt.HWND),
+                ("uID", wt.UINT),
+                ("uFlags", wt.UINT),
+                ("uCallbackMessage", wt.UINT),
+                ("hIcon", wt.HICON),
+                ("szTip", WCHAR * 128),
+                ("dwState", wt.DWORD),
+                ("dwStateMask", wt.DWORD),
+                ("szInfo", WCHAR * 256),
+                ("uVersion", wt.UINT),
+                ("szInfoTitle", WCHAR * 64),
+                ("dwInfoFlags", wt.DWORD),
+            ]
+
+        WNDPROC = ctypes.WINFUNCTYPE(
+            ctypes.c_long, wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM,
         )
 
-        self._icon = pystray.Icon("Bark", image, "Bark", menu)
-        log.info("System tray started.")
-        self._icon.run()
+        class WNDCLASSEXW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wt.UINT),
+                ("style", wt.UINT),
+                ("lpfnWndProc", WNDPROC),
+                ("cbClsExtra", ctypes.c_int),
+                ("cbWndExtra", ctypes.c_int),
+                ("hInstance", wt.HINSTANCE),
+                ("hIcon", wt.HICON),
+                ("hCursor", wt.HANDLE),
+                ("hbrBackground", wt.HBRUSH),
+                ("lpszMenuName", wt.LPCWSTR),
+                ("lpszClassName", wt.LPCWSTR),
+                ("hIconSm", wt.HICON),
+            ]
+
+        # ---- Menu item IDs ----
+        _ID_OVERLAY = 1
+        _ID_CLIPBOARD = 2
+        _ID_SOUND = 3
+        _ID_DARK = 4
+        _ID_STREAMING = 5
+        _ID_STARTUP = 6
+        _ID_HISTORY = 7
+        _ID_QUIT = 8
+        _ID_LANG_BASE = 100   # 100 + i
+        _ID_TRIGGER_BASE = 200  # 200 + i
+
+        # ---- Load icon via ExtractIconW (proven to work) ----
+        _shell32.ExtractIconW.restype = ctypes.c_void_p
+        hicon = _shell32.ExtractIconW(0, ICON_PATH, 0)
+        if not hicon or hicon == 1:
+            log.error(f"ExtractIconW failed for tray icon: {ICON_PATH}")
+            return
+        log.info(f"Tray: ExtractIconW OK ({hicon:#x})")
+
+        # ---- Dispatch map: menu ID -> handler ----
+        trigger_keys = TRIGGER_KEYS_WIN
+        trigger_cfg_key = "trigger_key_win"
+        tray = self  # closure ref
+
+        dispatch = {
+            _ID_OVERLAY: self._toggle_overlay,
+            _ID_CLIPBOARD: self._toggle_clipboard,
+            _ID_SOUND: self._toggle_sound,
+            _ID_DARK: self._toggle_dark_mode,
+            _ID_STREAMING: self._toggle_streaming,
+            _ID_STARTUP: self._toggle_startup,
+            _ID_HISTORY: self._open_history,
+            _ID_QUIT: self._quit,
+        }
+        for i, (code, _name) in enumerate(ALL_LANGUAGES):
+            dispatch[_ID_LANG_BASE + i] = self._make_language_handler(code)
+        for i, (code, _name) in enumerate(trigger_keys):
+            dispatch[_ID_TRIGGER_BASE + i] = self._make_trigger_handler(code, trigger_cfg_key)
+
+        # ---- Build popup menu ----
+        def _build_menu():
+            hmenu = _user32.CreatePopupMenu()
+
+            clip_text = "Mode: Clipboard" if cfg["clipboard_mode"] else "Mode: Type"
+            sound_text = "Sound: ON" if cfg["sound_enabled"] else "Sound: OFF"
+            dark_text = "Dark Mode: ON" if cfg["dark_mode"] else "Dark Mode: OFF"
+            stream_text = "Streaming: ON" if cfg["streaming_preview"] else "Streaming: OFF"
+            startup_text = "Start on Login: ON" if cfg["start_on_login"] else "Start on Login: OFF"
+
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_OVERLAY, "Show/Hide Overlay")
+            _user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_CLIPBOARD, clip_text)
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_SOUND, sound_text)
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_DARK, dark_text)
+            _user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
+
+            # Language submenu
+            hlang = _user32.CreatePopupMenu()
+            for i, (code, name) in enumerate(LANGUAGES_TOP):
+                flags = MF_STRING | (MF_CHECKED if cfg["language"] == code else 0)
+                _user32.AppendMenuW(hlang, flags, _ID_LANG_BASE + i, name)
+            # Others sub-submenu
+            hothers = _user32.CreatePopupMenu()
+            offset = len(LANGUAGES_TOP)
+            for i, (code, name) in enumerate(LANGUAGES_OTHER):
+                flags = MF_STRING | (MF_CHECKED if cfg["language"] == code else 0)
+                _user32.AppendMenuW(hothers, flags, _ID_LANG_BASE + offset + i, name)
+            _user32.AppendMenuW(hlang, MF_POPUP, hothers, "Others")
+            _user32.AppendMenuW(hmenu, MF_POPUP, hlang, "Language")
+
+            # Trigger key submenu
+            htrigger = _user32.CreatePopupMenu()
+            for i, (code, name) in enumerate(trigger_keys):
+                flags = MF_STRING | (MF_CHECKED if cfg[trigger_cfg_key] == code else 0)
+                _user32.AppendMenuW(htrigger, flags, _ID_TRIGGER_BASE + i, name)
+            _user32.AppendMenuW(hmenu, MF_POPUP, htrigger, "Trigger Key")
+
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_STREAMING, stream_text)
+            _user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_STARTUP, startup_text)
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_HISTORY, "History")
+            _user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_QUIT, "Quit")
+            _apply_menu_bg(hmenu)
+            return hmenu
+
+        # ---- WndProc ----
+        def wnd_proc(hwnd, msg, wparam, lparam):
+            if msg == WM_TRAYICON:
+                if lparam in (WM_RBUTTONUP, WM_LBUTTONUP):
+                    pt = wt.POINT()
+                    _user32.GetCursorPos(ctypes.byref(pt))
+                    _user32.SetForegroundWindow(hwnd)
+                    hmenu = _build_menu()
+                    cmd = _user32.TrackPopupMenu(
+                        hmenu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTBUTTON,
+                        pt.x, pt.y, 0, hwnd, None,
+                    )
+                    _user32.DestroyMenu(hmenu)
+                    _user32.PostMessageW(hwnd, 0, 0, 0)  # dismiss
+                    if cmd and cmd in dispatch:
+                        try:
+                            dispatch[cmd]()
+                        except Exception as e:
+                            log.error(f"Tray menu handler error: {e}")
+                    return 0
+            elif msg == WM_DESTROY:
+                if hasattr(tray, "_win32_nid") and tray._win32_nid:
+                    _shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(tray._win32_nid))
+                _user32.PostQuitMessage(0)
+                return 0
+            return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+        # prevent GC of callback
+        self._wnd_proc_ref = WNDPROC(wnd_proc)
+
+        # ---- Register window class ----
+        hinstance = _kernel32.GetModuleHandleW(None)
+        wc = WNDCLASSEXW()
+        wc.cbSize = ctypes.sizeof(WNDCLASSEXW)
+        wc.lpfnWndProc = self._wnd_proc_ref
+        wc.hInstance = hinstance
+        wc.lpszClassName = "BarkTrayWnd"
+
+        atom = _user32.RegisterClassExW(ctypes.byref(wc))
+        if not atom:
+            log.error(f"RegisterClassExW failed: {_kernel32.GetLastError()}")
+            return
+
+        # ---- Create hidden window (normal, not message-only) ----
+        # TrackPopupMenu + SetForegroundWindow need a real window
+        hwnd = _user32.CreateWindowExW(
+            0, "BarkTrayWnd", "Bark", 0,
+            0, 0, 0, 0,
+            None, None, hinstance, None,
+        )
+        if not hwnd:
+            log.error(f"CreateWindowExW failed: {_kernel32.GetLastError()}")
+            return
+
+        # ---- Shell_NotifyIconW ----
+        nid = NOTIFYICONDATAW()
+        nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        nid.hWnd = hwnd
+        nid.uID = 1
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+        nid.uCallbackMessage = WM_TRAYICON
+        nid.hIcon = ctypes.cast(ctypes.c_void_p(hicon), wt.HICON)
+        nid.szTip = "Bark - Voice Dictation"
+        self._win32_nid = nid
+        self._win32_hwnd = hwnd
+
+        ok = _shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
+        if ok:
+            log.info("Shell_NotifyIconW(NIM_ADD) succeeded -- tray icon created")
+        else:
+            log.error(f"Shell_NotifyIconW(NIM_ADD) failed: {_kernel32.GetLastError()}")
+            return
+
+        # ---- Balloon notification ----
+        trigger = cfg.get("trigger_key_win", "capslock")
+        key_name = {"capslock": "Caps Lock", "scroll_lock": "Scroll Lock",
+                     "pause": "Pause", "right_ctrl": "Right Ctrl"}.get(trigger, trigger)
+        nid.uFlags = NIF_INFO
+        nid.szInfo = f"Hold {key_name} to dictate"
+        nid.szInfoTitle = "Bark is running"
+        _shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid))
+
+        log.info("Win32 tray message loop starting...")
+
+        # ---- Message loop ----
+        msg = wt.MSG()
+        while _user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            _user32.TranslateMessage(ctypes.byref(msg))
+            _user32.DispatchMessageW(ctypes.byref(msg))
+
+        log.info("Win32 tray message loop ended")
 
     # ================================================================ Menu handlers (shared)
 
@@ -528,7 +717,10 @@ class SystemTray:
                 self._on_quit()
             except Exception:
                 pass
-        if self._icon:
+        if IS_WIN and self._win32_hwnd:
+            import ctypes
+            ctypes.windll.user32.DestroyWindow(self._win32_hwnd)
+        elif self._icon:
             self._icon.stop()
         if IS_MAC:
             # On Mac, _quit runs on the main thread via _action_queue,
@@ -539,7 +731,11 @@ class SystemTray:
                 pass
 
     def stop(self):
-        if self._icon:
+        if IS_WIN and self._win32_hwnd:
+            import ctypes
+            ctypes.windll.user32.DestroyWindow(self._win32_hwnd)
+            self._win32_hwnd = None
+        elif self._icon:
             try:
                 self._icon.stop()
             except Exception:
