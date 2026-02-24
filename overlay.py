@@ -212,6 +212,25 @@ class Overlay:
             self._root.attributes("-alpha", 0)
             self._root.resizable(False, False)
 
+            # Force taskbar icon via Win32 (overrides pythonw.exe default)
+            try:
+                self._root.update_idletasks()
+                root_hwnd = _user32.GetParent(self._root.winfo_id())
+                # ExtractIconW is simpler and handles ICO files reliably
+                _shell32 = ctypes.windll.shell32
+                _shell32.ExtractIconW.restype = ctypes.c_void_p
+                hicon = _shell32.ExtractIconW(0, ICON_PATH, 0)
+                log.info(f"ExtractIconW returned {hicon:#x}" if hicon else "ExtractIconW returned NULL")
+                if hicon and hicon != 1:
+                    _WM_SETICON = 0x0080
+                    _user32.SendMessageW(root_hwnd, _WM_SETICON, 1, hicon)  # ICON_BIG
+                    _user32.SendMessageW(root_hwnd, _WM_SETICON, 0, hicon)  # ICON_SMALL
+                    log.info("Taskbar icon set to Westie via WM_SETICON")
+                else:
+                    log.warning(f"Could not extract icon from {ICON_PATH}")
+            except Exception as e:
+                log.warning(f"Failed to set taskbar icon: {e}")
+
             self.root = tk.Toplevel(self._root)
             self.root.title("Bark")
             self.root.overrideredirect(True)
@@ -265,15 +284,28 @@ class Overlay:
         # Position
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
+        # Bottom margin: account for macOS Dock / Windows taskbar
+        if IS_WIN:
+            margin_top = 0
+            try:
+                # Use work area (excludes taskbar) to find taskbar height
+                rect = wt.RECT()
+                _user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)
+                work_bottom = rect.bottom
+                margin_bottom = max(10, sh - work_bottom + 10)
+            except Exception:
+                margin_bottom = 60  # safe fallback
+        else:
+            margin_top = 38
+            margin_bottom = 80  # macOS Dock
         if cfg["overlay_x"] is not None and cfg["overlay_y"] is not None:
             x, y = cfg["overlay_x"], cfg["overlay_y"]
         else:
             x = (sw - DISPLAY_W) // 2
-            y = sh - DISPLAY_H - 60
-        # Clamp to visible screen area (account for menu bar + Dock)
-        margin_top = 38 if IS_MAC else 0
+            y = sh - DISPLAY_H - margin_bottom
+        # Clamp to visible screen area
         x = max(0, min(x, sw - DISPLAY_W))
-        y = max(margin_top, min(y, sh - DISPLAY_H - 10))
+        y = max(margin_top, min(y, sh - DISPLAY_H - margin_bottom))
         self.root.geometry(f"{DISPLAY_W}x{DISPLAY_H}+{x}+{y}")
 
         if IS_WIN:
@@ -814,6 +846,8 @@ class Overlay:
     # ============================================================ right-click menu
 
     def _show_menu(self, event):
+        from tray import LANGUAGES_TOP, LANGUAGES_OTHER, TRIGGER_KEYS_WIN, TRIGGER_KEYS_MAC
+
         if self._dark:
             mbg, mfg = "#1A1C1E", GREEN
             mabg, mafg = GREEN, "#1A1C1E"
@@ -821,21 +855,73 @@ class Overlay:
             mbg, mfg = "#F5F5F3", "#1A1C1E"
             mabg, mafg = GREEN, "#1A1C1E"
 
-        menu = tk.Menu(
-            self.root, tearoff=0,
-            bg=mbg, fg=mfg,
+        menu_kw = dict(
+            tearoff=0, bg=mbg, fg=mfg,
             activebackground=mabg, activeforeground=mafg,
             font=(self._font, 9), borderwidth=1, relief="solid",
         )
+        menu = tk.Menu(self.root, **menu_kw)
+
+        # Toggles
         sound_label = "Sound: ON" if cfg["sound_enabled"] else "Sound: OFF"
         menu.add_command(label=sound_label, command=self._toggle_sound)
         dark_label = "Dark Mode: ON" if self._dark else "Dark Mode: OFF"
         menu.add_command(label=dark_label, command=self._toggle_dark_mode)
         clip_label = "Mode: Clipboard" if cfg["clipboard_mode"] else "Mode: Type"
         menu.add_command(label=clip_label, command=self._toggle_clipboard_mode)
+
+        menu.add_separator()
+
+        # Language submenu
+        lang_menu = tk.Menu(menu, **menu_kw)
+        current_lang = cfg["language"]
+        for code, name in LANGUAGES_TOP:
+            prefix = "\u2022 " if current_lang == code else "  "
+            lang_menu.add_command(
+                label=f"{prefix}{name}",
+                command=self._make_set_language(code),
+            )
+        # Others cascade
+        others_menu = tk.Menu(lang_menu, **menu_kw)
+        for code, name in LANGUAGES_OTHER:
+            prefix = "\u2022 " if current_lang == code else "  "
+            others_menu.add_command(
+                label=f"{prefix}{name}",
+                command=self._make_set_language(code),
+            )
+        lang_menu.add_cascade(label="Others", menu=others_menu)
+        menu.add_cascade(label="Language", menu=lang_menu)
+
+        # Trigger key submenu
+        trigger_keys = TRIGGER_KEYS_WIN if IS_WIN else TRIGGER_KEYS_MAC
+        trigger_cfg_key = "trigger_key_win" if IS_WIN else "trigger_key_mac"
+        trigger_menu = tk.Menu(menu, **menu_kw)
+        for code, name in trigger_keys:
+            prefix = "\u2022 " if cfg[trigger_cfg_key] == code else "  "
+            trigger_menu.add_command(
+                label=f"{prefix}{name}",
+                command=self._make_set_trigger(code, trigger_cfg_key),
+            )
+        menu.add_cascade(label="Trigger Key", menu=trigger_menu)
+
         menu.add_separator()
         menu.add_command(label="Quit", command=self.quit)
         menu.tk_popup(event.x_root, event.y_root)
+
+    def _make_set_language(self, code):
+        def handler():
+            cfg["language"] = code
+            save_config()
+            name = code or "Auto"
+            self._show_tooltip(f"Language: {name}", 1500)
+        return handler
+
+    def _make_set_trigger(self, code, cfg_key):
+        def handler():
+            cfg[cfg_key] = code
+            save_config()
+            self._show_tooltip("Restart to apply", 2000)
+        return handler
 
     def _toggle_show_overlay(self):
         cfg["show_overlay"] = not cfg["show_overlay"]
@@ -886,6 +972,9 @@ class Overlay:
             )
 
     def _hide_overlay(self):
+        # Don't fade while actively recording or transcribing
+        if self._state in ("recording", "transcribing"):
+            return
         self._opacity_target = 0.0
         # Animation loop handles the fade + withdraw when opacity reaches 0
 

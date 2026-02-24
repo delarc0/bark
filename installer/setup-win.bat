@@ -285,23 +285,24 @@ if "!VENV_OK!"=="1" (
 echo.
 
 :: ── Step 5: Install PyTorch ─────────────────────────────────────
-.venv\Scripts\pip.exe install --upgrade pip --quiet 2>nul
+echo   Upgrading pip...
+.venv\Scripts\python.exe -m pip install --upgrade pip
 if "!GPU_OK!"=="1" (
     echo [5/7] Installing PyTorch with CUDA support...
     echo   ^(This may take several minutes - ~2.5 GB download^)
     echo.
-    .venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cu121
+    .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
     if errorlevel 1 (
         echo.
         echo   CUDA PyTorch install failed. Trying CPU-only version...
         echo.
-        .venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cpu
+        .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
     )
 ) else (
     echo [5/7] Installing PyTorch ^(CPU-only^)...
     echo   ^(This may take a few minutes^)
     echo.
-    .venv\Scripts\pip.exe install torch --index-url https://download.pytorch.org/whl/cpu
+    .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 )
 if errorlevel 1 (
     echo.
@@ -380,12 +381,10 @@ if "!GPU_OK!"=="1" (
     echo     Setup complete! ^(CPU mode^)
 )
 echo.
-echo     Launch Bark from:
-echo     - Desktop shortcut
-echo     - Start Menu ^> Bark
-echo.
 echo     First launch: the Whisper model
 echo     downloads automatically ^(~1.5 GB^).
 echo   ========================================
 echo.
-pause
+echo   Press any key to launch Bark...
+pause >nul
+start "" .venv\Scripts\pythonw.exe dictation.py

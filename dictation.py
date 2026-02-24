@@ -209,6 +209,15 @@ def main():
         except Exception as e:
             log.error(f"Failed to initialize: {e}", exc_info=True)
             ui.set_state("error")
+            # Show error via tray notification (Windows) so user isn't left with nothing
+            if IS_WIN and ctx.get("tray") and getattr(ctx["tray"], "_icon", None):
+                try:
+                    ctx["tray"]._icon.notify(
+                        f"{e}\n\nCheck dictation.log for details.",
+                        "Bark failed to start",
+                    )
+                except Exception:
+                    pass
 
     threading.Thread(target=init_backend, daemon=True).start()
 
