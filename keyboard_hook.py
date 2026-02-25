@@ -72,6 +72,9 @@ class KeyboardHook:
             trigger = cfg["trigger_key_win"]
             self._vk_trigger = VK_CODES.get(trigger, VK_CAPITAL)
             self._is_capslock = (self._vk_trigger == VK_CAPITAL)
+            self._press_time = 0.0
+            self._recording_started = False
+            self._hold_timer = None
             log.info(f"Windows trigger key: {trigger} (VK=0x{self._vk_trigger:02X})")
             if self._is_capslock:
                 self._initial_caps_state = self._get_caps_state()
@@ -87,20 +90,50 @@ class KeyboardHook:
             ctypes.windll.user32.keybd_event(VK_CAPITAL, 0x45, 0, 0)
             ctypes.windll.user32.keybd_event(VK_CAPITAL, 0x45, KEYEVENTF_KEYUP, 0)
 
+    _HOLD_THRESHOLD = 0.3  # seconds: tap < threshold = normal key, hold >= threshold = record
+
     def _win32_event_filter(self, msg, data):
         if data.vkCode == self._vk_trigger:
             if msg in (WM_KEYDOWN, WM_SYSKEYDOWN) and not self._pressed:
                 self._pressed = True
-                try:
-                    self._on_record_start()
-                except Exception as e:
-                    log.error(f"Record start failed: {e}")
+                self._press_time = time.monotonic()
+                self._recording_started = False
+                if self._is_capslock:
+                    # Delay recording - only start if held past threshold
+                    self._hold_timer = threading.Timer(
+                        self._HOLD_THRESHOLD, self._start_if_held
+                    )
+                    self._hold_timer.start()
+                else:
+                    # Non-capslock triggers start immediately
+                    self._recording_started = True
+                    try:
+                        self._on_record_start()
+                    except Exception as e:
+                        log.error(f"Record start failed: {e}")
             elif msg in (WM_KEYUP, WM_SYSKEYUP) and self._pressed:
                 self._pressed = False
-                threading.Thread(
-                    target=self._safe_record_stop, daemon=True
-                ).start()
+                hold_duration = time.monotonic() - self._press_time
+                if self._is_capslock and hold_duration < self._HOLD_THRESHOLD:
+                    # Quick tap - cancel timer, pass through as normal Caps Lock
+                    if self._hold_timer:
+                        self._hold_timer.cancel()
+                    ctypes.windll.user32.keybd_event(VK_CAPITAL, 0x45, 0, 0)
+                    ctypes.windll.user32.keybd_event(VK_CAPITAL, 0x45, KEYEVENTF_KEYUP, 0)
+                elif self._recording_started:
+                    threading.Thread(
+                        target=self._safe_record_stop, daemon=True
+                    ).start()
             self._listener.suppress_event()
+
+    def _start_if_held(self):
+        """Called by timer after threshold - start recording if key still held."""
+        if self._pressed and not self._recording_started:
+            self._recording_started = True
+            try:
+                self._on_record_start()
+            except Exception as e:
+                log.error(f"Record start failed: {e}")
 
     # --- Mac-specific (Quartz CGEventTap on dedicated thread) ---
 
