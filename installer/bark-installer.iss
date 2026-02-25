@@ -4,9 +4,9 @@
 
 [Setup]
 AppName=Bark
-AppVersion=1.2.1
+AppVersion=1.3.0
 AppPublisher=LAB37
-AppPublisherURL=https://lab37.se
+AppPublisherURL=https://lab37.io
 DefaultDirName={localappdata}\Bark
 DefaultGroupName=Bark
 DisableProgramGroupPage=yes
@@ -44,17 +44,23 @@ Source: "..\VERSION"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\start.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\launch.vbs"; DestDir: "{app}"; Flags: ignoreversion
-; Setup script
-Source: "setup-win.bat"; DestDir: "{app}"; Flags: ignoreversion
+; Setup + installer scripts
+Source: "setup-win.bat"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "create-shortcuts.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Bark"; Filename: "{app}\launch.vbs"; IconFilename: "{app}\icon.ico"; WorkingDir: "{app}"; AppUserModelID: "lab37.bark"
 Name: "{autodesktop}\Bark"; Filename: "{app}\launch.vbs"; IconFilename: "{app}\icon.ico"; WorkingDir: "{app}"; Tasks: desktopicon; AppUserModelID: "lab37.bark"
 
 [Run]
-Filename: "cmd.exe"; Parameters: "/c ""{app}\setup-win.bat"""; WorkingDir: "{app}"; Description: "Set up Python environment (required)"; Flags: postinstall nowait
+Filename: "cmd.exe"; Parameters: "/c ""{app}\installer\setup-win.bat"""; WorkingDir: "{app}"; Description: "Set up Python environment (required)"; Flags: postinstall nowait
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.venv"
 Type: filesandordirs; Name: "{app}\__pycache__"
+Type: filesandordirs; Name: "{app}\installer"
 Type: files; Name: "{app}\dictation.log"
+Type: files; Name: "{app}\bark_config.json"
+Type: files; Name: "{app}\bark_history.txt"
+Type: files; Name: "{app}\.bark.lock"
+Type: files; Name: "{app}\.setup-version"
