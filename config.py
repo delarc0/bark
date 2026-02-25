@@ -117,9 +117,15 @@ else:
         COMPUTE_TYPE = "int8"
         log.warning("CUDA not available - using CPU mode (slower transcription)")
 
-# Virtual key codes (platform-fixed)
+# Virtual key codes (Windows)
 if IS_WIN:
     VK_CAPITAL = 0x14
+    VK_CODES = {
+        "capslock": 0x14,      # VK_CAPITAL
+        "scroll_lock": 0x91,   # VK_SCROLL
+        "pause": 0x13,         # VK_PAUSE
+        "right_ctrl": 0xA3,    # VK_RCONTROL
+    }
 
 # Trigger key display name
 _KEY_NAMES = {
