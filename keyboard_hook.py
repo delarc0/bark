@@ -8,7 +8,7 @@ from config import cfg, IS_WIN, IS_MAC
 
 if IS_WIN:
     import ctypes
-    from config import VK_CAPITAL
+    from config import VK_CAPITAL, VK_CODES
 
 if IS_MAC:
     from Quartz import (
@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 # Windows constants
 WM_KEYDOWN = 256
 WM_KEYUP = 257
+WM_SYSKEYDOWN = 260
+WM_SYSKEYUP = 261
 KEYEVENTF_KEYUP = 0x2
 
 # Mac trigger key mappings: keycode + flag mask
@@ -67,7 +69,12 @@ class KeyboardHook:
                 trigger, _MAC_TRIGGER_KEYS["right_option"]
             )
         if IS_WIN:
-            self._initial_caps_state = self._get_caps_state()
+            trigger = cfg["trigger_key_win"]
+            self._vk_trigger = VK_CODES.get(trigger, VK_CAPITAL)
+            self._is_capslock = (self._vk_trigger == VK_CAPITAL)
+            log.info(f"Windows trigger key: {trigger} (VK=0x{self._vk_trigger:02X})")
+            if self._is_capslock:
+                self._initial_caps_state = self._get_caps_state()
 
     # --- Windows-specific ---
 
@@ -81,14 +88,14 @@ class KeyboardHook:
             ctypes.windll.user32.keybd_event(VK_CAPITAL, 0x45, KEYEVENTF_KEYUP, 0)
 
     def _win32_event_filter(self, msg, data):
-        if data.vkCode == VK_CAPITAL:
-            if msg == WM_KEYDOWN and not self._pressed:
+        if data.vkCode == self._vk_trigger:
+            if msg in (WM_KEYDOWN, WM_SYSKEYDOWN) and not self._pressed:
                 self._pressed = True
                 try:
                     self._on_record_start()
                 except Exception as e:
                     log.error(f"Record start failed: {e}")
-            elif msg == WM_KEYUP and self._pressed:
+            elif msg in (WM_KEYUP, WM_SYSKEYUP) and self._pressed:
                 self._pressed = False
                 threading.Thread(
                     target=self._safe_record_stop, daemon=True
@@ -248,7 +255,7 @@ class KeyboardHook:
     def stop(self):
         if self._listener:
             self._listener.stop()
-            if IS_WIN:
+            if IS_WIN and self._is_capslock:
                 self._restore_caps_state()
         if IS_MAC:
             if self._tap_source and self._tap_loop:
