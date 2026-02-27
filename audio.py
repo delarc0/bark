@@ -50,6 +50,14 @@ class AudioRecorder:
 
     def _start_stream(self):
         """Start the always-on mic stream for pre-buffering."""
+        # Verify a microphone exists before opening the stream
+        try:
+            default_in = sd.query_devices(kind="input")
+        except (sd.PortAudioError, ValueError):
+            raise RuntimeError(
+                "No microphone found. Connect a microphone and restart Bark."
+            )
+
         self._stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=CHANNELS,

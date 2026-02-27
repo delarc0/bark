@@ -31,9 +31,13 @@ log = logging.getLogger(__name__)
 
 # Add NVIDIA CUDA DLLs to path before importing ctranslate2 (Windows only)
 if IS_WIN:
+    _sp = os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia")
     for _nvidia_dir in [
-        os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia", "cublas", "bin"),
-        os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia", "cudnn", "bin"),
+        os.path.join(_sp, "cublas", "bin"),
+        os.path.join(_sp, "cudnn", "bin"),
+        os.path.join(_sp, "cuda_runtime", "bin"),
+        os.path.join(_sp, "cufft", "bin"),
+        os.path.join(_dir, ".venv", "Lib", "site-packages", "ctranslate2"),
     ]:
         if os.path.isdir(_nvidia_dir):
             os.add_dll_directory(_nvidia_dir)
@@ -219,10 +223,11 @@ def main():
                 except Exception:
                     pass
 
-    threading.Thread(target=init_backend, daemon=True).start()
-
-    # System tray icon (daemon thread)
+    # System tray icon -- start BEFORE init_backend so the icon is ready
+    # to show error notifications if initialization fails
     tray.start()
+
+    threading.Thread(target=init_backend, daemon=True).start()
 
     # Background version check
     def _check_version():
@@ -253,21 +258,30 @@ def _acquire_instance_lock():
     instance is already running.
     """
     lock_path = os.path.join(_dir, ".bark.lock")
-    try:
-        import fcntl
-        lock_file = open(lock_path, "w")
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        lock_file.write(str(os.getpid()))
-        lock_file.flush()
-        return lock_file
-    except (IOError, OSError):
-        return None
-    except ImportError:
-        # fcntl not available (Windows) — use msvcrt
+    if IS_WIN:
+        # Windows: use msvcrt file locking
+        # Open as r+/a+ so we don't truncate another instance's lock file,
+        # and write a sentinel byte first so there's data to lock.
         try:
             import msvcrt
-            lock_file = open(lock_path, "w")
+            # Create file if missing, don't truncate if exists
+            if not os.path.exists(lock_path):
+                open(lock_path, "w").close()
+            lock_file = open(lock_path, "r+")
             msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            lock_file.seek(0)
+            lock_file.write(str(os.getpid()))
+            lock_file.truncate()
+            lock_file.flush()
+            return lock_file
+        except (IOError, OSError):
+            return None
+    else:
+        # Unix: use fcntl file locking
+        try:
+            import fcntl
+            lock_file = open(lock_path, "w")
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
             lock_file.write(str(os.getpid()))
             lock_file.flush()
             return lock_file
