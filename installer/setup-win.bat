@@ -243,10 +243,54 @@ for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
 
 if !PY_MAJOR! NEQ 3 goto :install_python
 if !PY_MINOR! LSS 11 goto :install_python
+if !PY_MINOR! GEQ 14 goto :python_too_new
 
 set PYTHON=python
 echo   Found: Python !PYVER!
 goto :python_ok
+
+:python_too_new
+echo   Python !PYVER! is too new ^(no PyTorch wheels available yet^).
+echo   PyTorch requires Python 3.12 or 3.13.
+echo   Looking for Python 3.12...
+:: Try the py launcher (installed with python.org / winget Python)
+py -3.12 -c "import sys; sys.exit(0)" >nul 2>&1
+if not errorlevel 1 (
+    set "PYTHON=py -3.12"
+    for /f "tokens=2 delims= " %%v in ('py -3.12 --version 2^>^&1') do echo   Found: Python %%v
+    goto :python_ok
+)
+:: Install Python 3.12 alongside the existing version
+echo   Python 3.12 not found. Installing via winget...
+winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+if errorlevel 1 (
+    echo.
+    echo   ERROR: Could not install Python 3.12 automatically.
+    echo   PyTorch requires Python 3.12 or 3.13.
+    echo   Please install Python 3.12 from https://www.python.org/downloads/
+    echo   Then re-run this script.
+    echo.
+    pause
+    exit /b 1
+)
+set "PATH=%LOCALAPPDATA%\Programs\Python\Python312\;%LOCALAPPDATA%\Programs\Python\Python312\Scripts\;!PATH!"
+py -3.12 -c "import sys; sys.exit(0)" >nul 2>&1
+if not errorlevel 1 (
+    set "PYTHON=py -3.12"
+    for /f "tokens=2 delims= " %%v in ('py -3.12 --version 2^>^&1') do echo   Installed: Python %%v
+    goto :python_ok
+)
+if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
+    set "PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+    echo   Using: Python 3.12 ^(direct path^)
+    goto :python_ok
+)
+echo.
+echo   ERROR: Python 3.12 was installed but cannot be found.
+echo   Close this window and re-run setup-win.bat.
+echo.
+pause
+exit /b 1
 
 :install_python
 echo   Python 3.11+ not found. Installing via winget...
@@ -314,6 +358,15 @@ set VENV_OK=0
 if exist ".venv\Scripts\python.exe" (
     .venv\Scripts\python.exe -c "import sys; sys.exit(0)" >nul 2>&1
     if not errorlevel 1 set VENV_OK=1
+)
+:: Ensure existing venv Python is compatible with PyTorch (< 3.14)
+if "!VENV_OK!"=="1" (
+    set "VENV_PY_MINOR=0"
+    for /f %%m in ('.venv\Scripts\python.exe -c "import sys; print(sys.version_info.minor)" 2^>nul') do set "VENV_PY_MINOR=%%m"
+    if !VENV_PY_MINOR! GEQ 14 (
+        echo   Existing venv uses Python 3.!VENV_PY_MINOR! ^(no PyTorch wheels^). Recreating...
+        set VENV_OK=0
+    )
 )
 if "!VENV_OK!"=="1" (
     echo   Existing venv OK - reusing.
