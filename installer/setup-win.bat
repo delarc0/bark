@@ -37,11 +37,16 @@ if "%PROCESSOR_ARCHITECTURE%"=="x86" (
 )
 
 :: Check disk space (~5 GB needed for venv + model)
-for /f "tokens=3" %%a in ('dir /-c "%cd%" 2^>nul ^| findstr /c:"bytes free"') do set FREE_BYTES=%%a
-set FREE_BYTES=!FREE_BYTES:,=!
+:: Use WMIC (locale-independent) instead of parsing dir output
+set FREE_GB=999
+for /f "skip=1 tokens=1" %%a in ('wmic logicaldisk where "DeviceID='%CD:~0,2%'" get FreeSpace 2^>nul') do (
+    if not "%%a"=="" (
+        set "FREE_BYTES=%%a"
+    )
+)
 if defined FREE_BYTES (
+    :: 5 GB = 5368709120. Check digit count (less than 10 digits = under ~1GB)
     set "FB=!FREE_BYTES!"
-    :: 5 GB = 5368709120 bytes (10 digits). Less than 10 digits = under ~1GB
     set "LEN=0"
     for /l %%i in (0,1,12) do if "!FB:~%%i,1!" neq "" set /a LEN+=1
     if !LEN! LSS 10 (
@@ -89,8 +94,14 @@ if not defined NVIDIA_SMI (
         if not defined NVIDIA_SMI if exist "%%~p" set "NVIDIA_SMI=%%~p"
     )
 )
+:: Also check DriverStore (some installs only have nvidia-smi here)
+if not defined NVIDIA_SMI (
+    for /f "delims=" %%p in ('dir /b /s "%SystemRoot%\System32\DriverStore\FileRepository\nv*\nvidia-smi.exe" 2^>nul') do (
+        if not defined NVIDIA_SMI set "NVIDIA_SMI=%%p"
+    )
+)
 
-:: Method 1: nvidia-smi (best source - exact GPU name + driver version)
+:: Method 1a: nvidia-smi --query-gpu (best source - exact GPU name + driver version)
 if defined NVIDIA_SMI (
     "!NVIDIA_SMI!" --query-gpu=name --format=csv,noheader > "%TEMP%\bark_gpu.txt" 2>nul
     if exist "%TEMP%\bark_gpu.txt" (
@@ -114,15 +125,57 @@ if defined NVIDIA_SMI (
     )
 )
 
-:: Method 2: PowerShell Get-CimInstance (reliable fallback, works without nvidia-smi)
-:: This queries the Windows device manager directly - works on all Windows 10+
+:: Method 1b: nvidia-smi -L (simpler format, works on older drivers)
+if "!GPU_OK!"=="0" if defined NVIDIA_SMI (
+    echo   --query-gpu failed, trying nvidia-smi -L...
+    "!NVIDIA_SMI!" -L > "%TEMP%\bark_gpu.txt" 2>nul
+    if exist "%TEMP%\bark_gpu.txt" (
+        for /f "usebackq tokens=1,* delims=:" %%a in ("%TEMP%\bark_gpu.txt") do (
+            if not "%%b"=="" (
+                :: Line looks like "GPU 0: NVIDIA GeForce RTX 3070 (UUID: GPU-xxx)"
+                :: Extract name before the UUID parenthetical
+                set "_LINE=%%b"
+                for /f "tokens=1 delims=(" %%n in ("!_LINE!") do (
+                    set "GPU_NAME=%%n"
+                    :: Trim leading space
+                    if "!GPU_NAME:~0,1!"==" " set "GPU_NAME=!GPU_NAME:~1!"
+                    set GPU_OK=1
+                )
+            )
+        )
+        del "%TEMP%\bark_gpu.txt" 2>nul
+    )
+    if "!GPU_OK!"=="1" echo   Found: !GPU_NAME!
+)
+
+:: Method 2: WMIC (simple, no execution policy issues)
 if "!GPU_OK!"=="0" (
     if defined NVIDIA_SMI (
         echo   nvidia-smi found but could not query GPU.
     ) else (
         echo   nvidia-smi not found.
     )
-    echo   Checking via Windows device manager...
+    echo   Checking via WMIC...
+    wmic path win32_VideoController where "name like '%%NVIDIA%%'" get name /value > "%TEMP%\bark_gpu.txt" 2>nul
+    if exist "%TEMP%\bark_gpu.txt" (
+        for /f "usebackq tokens=2 delims==" %%g in ("%TEMP%\bark_gpu.txt") do (
+            if not "%%g"=="" (
+                set "GPU_NAME=%%g"
+                set GPU_OK=1
+            )
+        )
+        del "%TEMP%\bark_gpu.txt" 2>nul
+    )
+    if "!GPU_OK!"=="1" (
+        echo   Found: !GPU_NAME!
+    )
+)
+
+:: Method 3: PowerShell Get-CimInstance (reliable fallback, works without nvidia-smi)
+:: This queries the Windows device manager directly - works on all Windows 10+
+if "!GPU_OK!"=="0" (
+    echo   WMIC did not find NVIDIA GPU.
+    echo   Checking via PowerShell...
     powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Where-Object {$_.Name -like '*NVIDIA*'} | Select-Object -First 1 -ExpandProperty Name" > "%TEMP%\bark_gpu.txt" 2>nul
     if exist "%TEMP%\bark_gpu.txt" (
         for /f "usebackq delims=" %%g in ("%TEMP%\bark_gpu.txt") do (
@@ -287,28 +340,69 @@ echo.
 :: ── Step 5: Install PyTorch ─────────────────────────────────────
 echo   Upgrading pip...
 .venv\Scripts\python.exe -m pip install --upgrade pip
+
+:: Detect Python version in venv (affects which PyTorch wheels are available)
+set VENV_PYVER=
+for /f "tokens=2 delims= " %%v in ('.venv\Scripts\python.exe --version 2^>^&1') do set VENV_PYVER=%%v
+echo   Python in venv: !VENV_PYVER!
+
+:: Pick CUDA index based on Python version
+:: cu121 has wheels for Python 3.8-3.12; cu124 adds Python 3.13+
+set CUDA_INDEX=https://download.pytorch.org/whl/cu121
+set CUDA_LABEL=cu121
+for /f "tokens=1,2 delims=." %%a in ("!VENV_PYVER!") do (
+    if %%b GEQ 13 (
+        set CUDA_INDEX=https://download.pytorch.org/whl/cu124
+        set CUDA_LABEL=cu124
+        echo   Python 3.13+ detected - using CUDA 12.4 index for wheel compatibility.
+    )
+)
+
+set TORCH_OK=0
 if "!GPU_OK!"=="1" (
-    echo [5/7] Installing PyTorch with CUDA support...
+    echo [5/7] Installing PyTorch with CUDA support ^(!CUDA_LABEL!^)...
     echo   ^(This may take several minutes - ~2.5 GB download^)
     echo.
-    .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
-    if errorlevel 1 (
+    .venv\Scripts\pip.exe install torch torchaudio --index-url !CUDA_INDEX!
+    if not errorlevel 1 set TORCH_OK=1
+    :: Fallback: try the other CUDA index
+    if "!TORCH_OK!"=="0" (
+        if "!CUDA_LABEL!"=="cu121" (
+            echo.
+            echo   cu121 install failed. Trying cu124...
+            echo.
+            .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+            if not errorlevel 1 set TORCH_OK=1
+        ) else (
+            echo.
+            echo   cu124 install failed. Trying cu121...
+            echo.
+            .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+            if not errorlevel 1 set TORCH_OK=1
+        )
+    )
+    :: Last resort: CPU-only
+    if "!TORCH_OK!"=="0" (
         echo.
         echo   CUDA PyTorch install failed. Trying CPU-only version...
         echo.
         .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+        if not errorlevel 1 set TORCH_OK=1
     )
 ) else (
     echo [5/7] Installing PyTorch ^(CPU-only^)...
     echo   ^(This may take a few minutes^)
     echo.
     .venv\Scripts\pip.exe install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    if not errorlevel 1 set TORCH_OK=1
 )
-if errorlevel 1 (
+if "!TORCH_OK!"=="0" (
     echo.
     echo   ERROR: PyTorch installation failed.
+    echo   Python version: !VENV_PYVER!
     echo   - Check your internet connection
     echo   - Make sure antivirus isn't blocking downloads
+    echo   - If Python 3.13+, try installing Python 3.12 instead
     echo   - Try running this script again
     echo.
     pause
@@ -331,7 +425,7 @@ if errorlevel 1 (
 :: CUDA libraries for faster-whisper (ctranslate2 needs these to find CUDA DLLs)
 if "!GPU_OK!"=="1" (
     echo   Installing CUDA libraries for Whisper...
-    .venv\Scripts\pip.exe install nvidia-cublas-cu12 nvidia-cudnn-cu12 --quiet
+    .venv\Scripts\pip.exe install nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12 --quiet
 )
 echo.
 
@@ -371,6 +465,19 @@ if exist "VERSION" (
 ) else (
     echo unknown> .setup-version
 )
+
+:: ── Write diagnostic log (share with support if issues arise) ──
+(
+    echo Bark Setup Diagnostics - %date% %time%
+    echo ----------------------------------------
+    echo Windows: %OS% %PROCESSOR_ARCHITECTURE%
+    echo GPU detected: !GPU_OK! ^(!GPU_NAME!^)
+    echo Python: !VENV_PYVER!
+    echo CUDA index: !CUDA_LABEL!
+    .venv\Scripts\python.exe -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA build: {torch.version.cuda}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0)}' if torch.cuda.is_available() else 'GPU: N/A')" 2>&1
+    .venv\Scripts\python.exe -c "import faster_whisper; print(f'faster-whisper: OK')" 2>&1
+    echo ----------------------------------------
+) > setup.log 2>&1
 
 :: ── Done ────────────────────────────────────────────────────────
 if "!GPU_OK!"=="1" (

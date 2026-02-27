@@ -106,8 +106,9 @@ else:
     try:
         import torch
         _cuda_ok = torch.cuda.is_available()
-    except Exception:
+    except Exception as _e:
         _cuda_ok = False
+        log.warning(f"PyTorch import or CUDA check failed: {_e}")
     if _cuda_ok:
         DEVICE = "cuda"
         COMPUTE_TYPE = "float16"
@@ -115,7 +116,29 @@ else:
     else:
         DEVICE = "cpu"
         COMPUTE_TYPE = "int8"
-        log.warning("CUDA not available - using CPU mode (slower transcription)")
+        # Log diagnostics to help debug GPU detection issues remotely
+        _diag = ["CUDA not available - using CPU mode (slower transcription)"]
+        try:
+            _diag.append(f"  PyTorch version: {torch.__version__}")
+            _diag.append(f"  PyTorch CUDA build: {torch.version.cuda or 'None (CPU-only build)'}")
+        except Exception:
+            _diag.append("  Could not read PyTorch version info")
+        try:
+            import subprocess
+            _smi = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if _smi.returncode == 0 and _smi.stdout.strip():
+                _diag.append(f"  nvidia-smi: {_smi.stdout.strip()}")
+                _diag.append("  GPU exists but CUDA is not working in Python.")
+                _diag.append("  Fix: update NVIDIA drivers or reinstall with setup-win.bat")
+            else:
+                _diag.append("  nvidia-smi: not found or no output")
+        except Exception:
+            _diag.append("  nvidia-smi: not reachable")
+        for _line in _diag:
+            log.warning(_line)
 
 # Virtual key codes (Windows)
 if IS_WIN:

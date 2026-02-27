@@ -752,7 +752,7 @@ class Overlay:
 
         tw = tip.winfo_reqwidth()
         ox = self.root.winfo_x() + (DISPLAY_W - tw) // 2
-        oy = self.root.winfo_y() - _s(30)
+        oy = max(0, self.root.winfo_y() - _s(30))
         tip.geometry(f"+{ox}+{oy}")
         try:
             tip.attributes("-alpha", 1.0)
