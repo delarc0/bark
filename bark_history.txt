@@ -1,0 +1,31 @@
+[2026-02-24 20:12:01] Testing, testing, testing. 
+[2026-02-24 20:12:09] I'm kidding, it did launch, I just don't see the pill anywhere. 
+[2026-02-24 20:13:07] Make sure that the system tray icon at the bottom right on Windows is the actual Westie. We need to be able to change settings by right-clicking on it when the pill UI element is not visible. 
+[2026-02-24 20:13:31] it currently does not appear i don't see any icon on the bottom right system tray either the icon on the system tray should be the westy 
+[2026-02-24 20:24:36] Now the PLUI element appears, but I still don't see anything in my system, and therefore I can't change options like language and so on. 
+[2026-02-24 20:29:24] Still no tray icon 
+[2026-02-24 20:31:03] bark is not on that list there is however python which is on and it i still don't see anything in the tray 
+[2026-02-24 20:31:52] Also, the icon on the taskbar is the default python one. 
+[2026-02-24 20:32:01] The taskbar icon is also the default Python icon. 
+[2026-02-24 20:32:48] Still nothing in the system, Trey. 
+[2026-02-24 20:36:18] It's still not in the system tray. 
+[2026-02-24 20:49:18] Now it works but I can't read the text when clicking the... 
+[2026-02-24 21:17:55] so now i see a dark gray menu with black text so barely visible but an improvement first time i see a dark menu 
+[2026-02-24 21:20:04] perfect now it's working however when i search in windows for bark i don't find it i have to launch it through the start 
+[2026-02-24 21:20:09] File. 
+[2026-02-24 21:20:22] Also the pill fades out while in use, it should only disappear after a period of inactivity, not while recording. 
+[2026-02-24 21:22:33] body weight tracking is fine measurement tracking is not necessary social features are nice coach dashboard analytics is nice wood timer and stopwatch is not necessary and notifications for new program drops are not necessary 
+[2026-02-24 21:23:06] It looks like you started translating the app, I was just asking for a translated summary. 
+[2026-02-24 21:23:14] to show potential investors nothing that would affect the app 
+[2026-02-24 21:23:34] So you might have to revert some of those translations. 
+[2026-02-24 21:25:30] my god, I cannot believe it's all fucking working. Let's fucking go. 
+[2026-02-24 21:25:45] I cannot believe it seems to be working. Let's push and commit with an updated installer for Windows as a new release. 
+[2026-02-24 21:31:21] did we publish an updated installer as a new release on github and update all the relevant descriptions in github with instructions for update and install on windows and mac 
+[2026-02-25 12:37:30] the apps lock is not working 
+[2026-02-25 12:40:14] at the moment. 
+[2026-02-25 12:40:24] It's still not working, please fix, make no mistakes. 
+[2026-02-25 18:41:35] y'all 
+[2026-02-27 21:09:02] Du är en åsna. 
+[2026-02-28 10:55:18] om jag pratar så här så skriver den allt jag säger 
+[2026-02-28 11:13:22] I think hemsidan is a bit trough. Can we test a more on-line color? 
+[2026-02-28 11:13:25] Föreslå gärna någonting. 
