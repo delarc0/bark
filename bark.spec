@@ -6,7 +6,7 @@ import glob
 import os
 
 block_cipher = None
-spec_dir = os.path.dirname(os.path.abspath(SPECPATH))
+spec_dir = SPECPATH  # PyInstaller sets SPECPATH to the .spec file's directory
 
 # ---------------------------------------------------------------------------
 # Binaries: CUDA DLLs + CTranslate2 + PortAudio
