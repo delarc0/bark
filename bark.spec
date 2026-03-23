@@ -75,12 +75,6 @@ hiddenimports = [
 # Excludes (size reduction -- strip unused PyTorch/Python modules)
 # ---------------------------------------------------------------------------
 excludes = [
-    "torch.distributed",
-    "torch.testing",
-    "torch._dynamo",
-    "torch.onnx",
-    "torch.utils.tensorboard",
-    "torch.profiler",
     "torchaudio",
     "torchvision",
     "matplotlib",
