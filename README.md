@@ -111,16 +111,17 @@ Important: use `/opt/homebrew/bin/python3`, not the system `/usr/bin/python3` (t
 
 - Windows 10/11
 - NVIDIA GPU with CUDA support (recommended) or CPU-only mode
-- Python 3.11+
-- NVIDIA drivers with CUDA 12.x (for GPU mode)
 
-### Install (recommended)
+### Install
 
-Download and run the installer from the [latest release](https://github.com/delarc0/bark/releases/latest). It handles Python environment setup, CUDA detection, and creates Start Menu + Desktop shortcuts.
+Download and run **Bark-Setup.exe** from the [latest release](https://github.com/delarc0/bark/releases/latest). No Python or developer tools needed -- everything is bundled.
 
 After install, search **"Bark"** in the Start Menu or use the Desktop shortcut.
 
-### Install (manual)
+> **Note:** Windows SmartScreen may show an "Unknown Publisher" warning. Click "More info" then "Run anyway". This is because the installer is not code-signed (yet).
+
+<details>
+<summary>Install from source (developers)</summary>
 
 ```bash
 git clone https://github.com/delarc0/bark.git
@@ -130,28 +131,13 @@ installer\setup-win.bat
 
 The setup script creates a virtual environment, detects your GPU, installs PyTorch (CUDA or CPU), and launches Bark when done.
 
-<details>
-<summary>Fully manual setup</summary>
-
-```bash
-git clone https://github.com/delarc0/bark.git
-cd bark
-python -m venv .venv
-.venv\Scripts\activate
-
-# PyTorch with CUDA
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-pip install -r requirements.txt
-```
-
-Launch: `.venv\Scripts\pythonw.exe dictation.py` or use `launch.vbs` for silent startup.
+Requirements for source install: Python 3.11+, NVIDIA drivers with CUDA 12.x (for GPU mode).
 
 </details>
 
 ### First launch
 
-1. The Whisper model downloads automatically (~1.5 GB, cached after first time)
+1. The Whisper model downloads automatically (~1.5 GB, one-time download)
 2. A small green overlay appears near the bottom of your screen
 3. Bark appears in your **system tray** (notification area) with a menu for all settings
 
@@ -165,17 +151,7 @@ Launch: `.venv\Scripts\pythonw.exe dictation.py` or use `launch.vbs` for silent 
 
 ### Updating
 
-If installed via installer, download the latest release and run the installer again.
-
-If installed via git:
-
-```bash
-cd bark
-git pull
-installer\setup-win.bat
-```
-
-The setup script detects your existing environment and only updates what changed.
+Download the latest installer from [releases](https://github.com/delarc0/bark/releases/latest) and run it again. Your settings and history are preserved.
 
 ---
 

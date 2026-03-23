@@ -172,8 +172,9 @@ SHADOW_BLUR = _s(12)
 SHADOW_Y = _s(4)
 SHADOW_ALPHA = 102  # 40%
 
-_dir = os.path.dirname(os.path.abspath(__file__))
-ICON_PATH = os.path.join(_dir, "icon.ico")
+from paths import get_app_dir
+
+ICON_PATH = os.path.join(get_app_dir(), "icon.ico")
 
 # --- Precompute drop shadow ---
 _SHADOW = Image.new("RGBA", (WIN_W, WIN_H), (0, 0, 0, 0))
