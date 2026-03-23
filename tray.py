@@ -5,10 +5,11 @@ import sys
 import threading
 
 from config import cfg, save_config, IS_WIN, IS_MAC
+from paths import get_app_dir
 
 log = logging.getLogger(__name__)
 
-_dir = os.path.dirname(os.path.abspath(__file__))
+_dir = get_app_dir()
 ICON_PATH = os.path.join(_dir, "icon.ico")
 
 # Language options: (config value, display name)
@@ -770,12 +771,16 @@ def _win_set_startup(enable: bool):
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
         if enable:
-            # Use pythonw.exe to run without console window
-            app_path = os.path.join(_dir, "dictation.py")
-            pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
-            if not os.path.exists(pythonw):
-                pythonw = sys.executable
-            winreg.SetValueEx(key, "Bark", 0, winreg.REG_SZ, f'"{pythonw}" "{app_path}"')
+            if getattr(sys, "frozen", False):
+                # Frozen mode: Bark.exe is the entry point
+                winreg.SetValueEx(key, "Bark", 0, winreg.REG_SZ, f'"{sys.executable}"')
+            else:
+                # Dev mode: use pythonw.exe to run without console window
+                app_path = os.path.join(_dir, "dictation.py")
+                pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+                if not os.path.exists(pythonw):
+                    pythonw = sys.executable
+                winreg.SetValueEx(key, "Bark", 0, winreg.REG_SZ, f'"{pythonw}" "{app_path}"')
             log.info("Added Bark to Windows startup.")
         else:
             try:

@@ -5,6 +5,7 @@ import threading
 import time
 
 from config import IS_WIN
+from paths import get_data_dir
 
 # pythonw.exe (Windows) sets stdout/stderr to None - redirect to devnull so libraries don't crash
 if IS_WIN:
@@ -14,7 +15,7 @@ if IS_WIN:
         sys.stderr = open(os.devnull, "w")
 
 # Setup logging first - writes to file so errors are visible even with pythonw.exe
-_dir = os.path.dirname(os.path.abspath(__file__))
+_dir = get_data_dir()
 _log_handlers = [
     logging.FileHandler(os.path.join(_dir, "dictation.log"), encoding="utf-8"),
 ]
@@ -29,8 +30,9 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Add NVIDIA CUDA DLLs to path before importing ctranslate2 (Windows only)
-if IS_WIN:
+# Add NVIDIA CUDA DLLs to path before importing ctranslate2 (dev mode only).
+# In frozen mode, PyInstaller bundles these DLLs directly.
+if IS_WIN and not getattr(sys, "frozen", False):
     _sp = os.path.join(_dir, ".venv", "Lib", "site-packages", "nvidia")
     for _nvidia_dir in [
         os.path.join(_sp, "cublas", "bin"),
@@ -257,7 +259,7 @@ def _acquire_instance_lock():
     Returns the lock file object (keep reference alive) or None if another
     instance is already running.
     """
-    lock_path = os.path.join(_dir, ".bark.lock")
+    lock_path = os.path.join(get_data_dir(), ".bark.lock")
     if IS_WIN:
         # Windows: use msvcrt file locking
         # Open as r+/a+ so we don't truncate another instance's lock file,

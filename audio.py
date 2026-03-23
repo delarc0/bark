@@ -1,5 +1,7 @@
 import logging
+import os
 import queue
+import sys
 import threading
 from collections import deque
 
@@ -42,9 +44,15 @@ class AudioRecorder:
 
     def _load_vad(self):
         log.info("Loading Silero VAD...")
-        self._vad_model, _ = torch.hub.load(
-            "snakers4/silero-vad", "silero_vad", trust_repo=True
-        )
+        if getattr(sys, "frozen", False):
+            # Frozen mode: load pre-saved JIT model bundled by PyInstaller
+            from paths import get_app_dir
+            model_path = os.path.join(get_app_dir(), "silero_vad.jit")
+            self._vad_model = torch.jit.load(model_path)
+        else:
+            self._vad_model, _ = torch.hub.load(
+                "snakers4/silero-vad", "silero_vad", trust_repo=True
+            )
         self._vad_model.eval()
         log.info("VAD loaded.")
 

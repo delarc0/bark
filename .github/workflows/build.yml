@@ -1,0 +1,63 @@
+name: Build Bark Installer
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyTorch (CUDA 12.1)
+        run: pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
+          pip install pyinstaller
+
+      - name: Pre-save Silero VAD model
+        run: |
+          python -c "
+          import torch
+          model, _ = torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)
+          torch.jit.save(model, 'silero_vad.jit')
+          print('Silero VAD saved.')
+          "
+
+      - name: Build with PyInstaller
+        run: pyinstaller bark.spec --clean
+
+      - name: Verify build
+        run: |
+          if (!(Test-Path "dist\Bark\Bark.exe")) { throw "Bark.exe not found" }
+          $size = (Get-Item "dist\Bark\Bark.exe").Length
+          Write-Host "Bark.exe size: $size bytes"
+        shell: pwsh
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+        shell: pwsh
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\bark-installer.iss
+        shell: pwsh
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/build/Bark-*-Setup.exe
+          generate_release_notes: true

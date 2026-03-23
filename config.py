@@ -4,15 +4,19 @@ import os
 import sys
 import tempfile
 
+from paths import get_app_dir, get_data_dir
+
 log = logging.getLogger(__name__)
 
 # Platform detection (not configurable)
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 
-# Config file lives next to the app
-_APP_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(_APP_DIR, "bark_config.json")
+# Resource dir (bundled read-only files: VERSION, icons)
+_APP_DIR = get_app_dir()
+# Data dir (writable user files: config, history, logs)
+_DATA_DIR = get_data_dir()
+CONFIG_PATH = os.path.join(_DATA_DIR, "bark_config.json")
 
 DEFAULT_CONFIG = {
     # Model

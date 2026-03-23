@@ -3,12 +3,13 @@ import os
 from datetime import datetime
 
 from config import IS_WIN
+from paths import get_data_dir
 
 log = logging.getLogger(__name__)
 
-_APP_DIR = os.path.dirname(os.path.abspath(__file__))
-HISTORY_PATH = os.path.join(_APP_DIR, "bark_history.txt")
-_HISTORY_OLD = os.path.join(_APP_DIR, "bark_history.old.txt")
+_DATA_DIR = get_data_dir()
+HISTORY_PATH = os.path.join(_DATA_DIR, "bark_history.txt")
+_HISTORY_OLD = os.path.join(_DATA_DIR, "bark_history.old.txt")
 _MAX_HISTORY_BYTES = 1_000_000  # 1 MB
 
 

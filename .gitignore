@@ -6,5 +6,7 @@ __pycache__/
 build/
 dist/
 *.spec
+!bark.spec
+silero_vad.jit
 Bark.app/
 *.iconset/
