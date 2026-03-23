@@ -45,7 +45,7 @@ DEFAULT_CONFIG = {
     # Streaming preview
     "streaming_preview": False,
     # Version (read from VERSION file, this is the fallback)
-    "version": "1.2.1",
+    "version": "1.3.1",
 }
 
 

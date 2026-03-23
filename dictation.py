@@ -176,7 +176,7 @@ def main():
         """Poll keyboard event queue (Mac only). Runs on main thread via after()."""
         if ctx["hook"]:
             ctx["hook"].poll_events()
-        ui._root.after(5, poll_keyboard)
+        ui._root.after(30, poll_keyboard)
 
     def start_keyboard():
         """Start keyboard hook."""

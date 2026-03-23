@@ -26,6 +26,7 @@ if IS_WIN:
     # Win32 constants for layered window (per-pixel alpha)
     _GWL_EXSTYLE = -20
     _WS_EX_LAYERED = 0x00080000
+    _WS_EX_NOACTIVATE = 0x08000000
     _ULW_ALPHA = 0x02
     _AC_SRC_OVER = 0x00
     _AC_SRC_ALPHA = 0x01
@@ -316,11 +317,7 @@ class Overlay:
         # Mac with show_overlay: stay withdrawn until first frame renders (see _animate)
         self.root.update_idletasks()
 
-        # Focus steal prevention (Windows)
-        self._refocus_enabled = False
-        if IS_WIN:
-            self.root.bind("<FocusIn>", lambda e: self.root.after(1, self._refocus))
-            self._root.after(2000, self._enable_refocus)
+        # Focus steal prevention: WS_EX_NOACTIVATE handles this on Windows
 
         if IS_MAC:
             self._keep_on_top()
@@ -404,7 +401,7 @@ class Overlay:
             self._hwnd = _user32.GetParent(self.root.winfo_id())
 
             style = _user32.GetWindowLongW(self._hwnd, _GWL_EXSTYLE)
-            _user32.SetWindowLongW(self._hwnd, _GWL_EXSTYLE, style | _WS_EX_LAYERED)
+            _user32.SetWindowLongW(self._hwnd, _GWL_EXSTYLE, style | _WS_EX_LAYERED | _WS_EX_NOACTIVATE)
 
             hdc_screen = _user32.GetDC(0)
             self._hdc_mem = _gdi32.CreateCompatibleDC(hdc_screen)
@@ -525,7 +522,9 @@ class Overlay:
             self.root.deiconify()
             self._mac_deiconified = True
 
-        self._anim_job = self._root.after(33, self._animate)
+        # 30fps during active states, 10fps when idle (reduces DWM recomposition flicker)
+        interval = 33 if self._state in ("recording", "transcribing", "done", "loading") else 100
+        self._anim_job = self._root.after(interval, self._animate)
 
     def _get_level(self):
         if self._recorder_ref and self._state == "recording":
@@ -721,6 +720,18 @@ class Overlay:
 
     # ============================================================ tooltip
 
+    def _make_noactivate(self, toplevel):
+        """Apply WS_EX_NOACTIVATE to a Toplevel so it never steals focus (Windows)."""
+        if not IS_WIN:
+            return
+        try:
+            toplevel.update_idletasks()
+            hwnd = _user32.GetParent(toplevel.winfo_id())
+            style = _user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
+            _user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, style | _WS_EX_NOACTIVATE)
+        except Exception:
+            pass
+
     def _show_tooltip(self, text, duration_ms=3000):
         if not cfg["show_overlay"]:
             return
@@ -736,6 +747,7 @@ class Overlay:
             tip.attributes("-topmost", True)
             tip.attributes("-alpha", 0.0)
             tip.configure(bg=tip_bg)
+            self._make_noactivate(tip)
             lbl = tk.Label(
                 tip, text=text, font=(self._font, 8), fg=tip_fg, bg=tip_bg,
             )
@@ -813,18 +825,6 @@ class Overlay:
             except Exception:
                 pass
         self._root.after(3000, self._keep_on_top)
-
-    def _enable_refocus(self):
-        self._refocus_enabled = True
-
-    def _refocus(self):
-        if not self._refocus_enabled:
-            return
-        try:
-            self.root.lower()
-            self.root.attributes("-topmost", True)
-        except Exception:
-            pass
 
     def _drag_start(self, event):
         self._drag_x = event.x
@@ -1015,6 +1015,7 @@ class Overlay:
         tip.overrideredirect(True)
         tip.attributes("-topmost", True)
         tip.configure(bg=tip_bg)
+        self._make_noactivate(tip)
         ox = self.root.winfo_x()
         oy = self.root.winfo_y() - _s(55)
         tip.geometry(f"{_s(260)}x{_s(40)}+{ox}+{oy}")

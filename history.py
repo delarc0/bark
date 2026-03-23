@@ -8,10 +8,24 @@ log = logging.getLogger(__name__)
 
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_PATH = os.path.join(_APP_DIR, "bark_history.txt")
+_HISTORY_OLD = os.path.join(_APP_DIR, "bark_history.old.txt")
+_MAX_HISTORY_BYTES = 1_000_000  # 1 MB
+
+
+def _rotate_if_needed():
+    """Rotate history file when it exceeds _MAX_HISTORY_BYTES."""
+    try:
+        if os.path.exists(HISTORY_PATH) and os.path.getsize(HISTORY_PATH) > _MAX_HISTORY_BYTES:
+            if os.path.exists(_HISTORY_OLD):
+                os.remove(_HISTORY_OLD)
+            os.rename(HISTORY_PATH, _HISTORY_OLD)
+    except Exception as e:
+        log.warning(f"History rotation failed: {e}")
 
 
 def append_history(text: str):
     try:
+        _rotate_if_needed()
         with open(HISTORY_PATH, "a", encoding="utf-8") as f:
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             f.write(f"[{ts}] {text}\n")
