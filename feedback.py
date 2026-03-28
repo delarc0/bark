@@ -50,8 +50,24 @@ def _generate_falling_boop(volume: float) -> np.ndarray:
     return _make_samples(samples)
 
 
+def _generate_tick(volume: float) -> np.ndarray:
+    """Short neutral tick -- confirms recording stopped, processing begins."""
+    duration_ms = 50
+    freq = 550
+    n = int(_BEEP_RATE * duration_ms / 1000)
+    samples = []
+    for i in range(n):
+        t = i / _BEEP_RATE
+        progress = i / n
+        env = 1.0 - progress  # quick linear fade
+        s = math.sin(2 * math.pi * freq * t)
+        samples.append(volume * env * s)
+    return _make_samples(samples)
+
+
 # Pre-generate tones at import time
 _TONE_START = _generate_rising_chirp(cfg["beep_volume"] * 0.45)
+_TONE_STOP = _generate_tick(cfg["beep_volume"] * 0.35)
 _TONE_DONE = _generate_falling_boop(cfg["beep_volume"] * 0.35)
 
 
@@ -70,8 +86,10 @@ if IS_MAC:
     # internal audio thread. Use macOS built-in afplay instead.
     _wav_dir = tempfile.mkdtemp(prefix="bark_beeps_")
     _WAV_START = os.path.join(_wav_dir, "start.wav")
+    _WAV_STOP = os.path.join(_wav_dir, "stop.wav")
     _WAV_DONE = os.path.join(_wav_dir, "done.wav")
     _save_wav(_TONE_START, _WAV_START)
+    _save_wav(_TONE_STOP, _WAV_STOP)
     _save_wav(_TONE_DONE, _WAV_DONE)
 
     def _play_mac(path: str):
@@ -89,7 +107,8 @@ if IS_MAC:
             _play_mac(_WAV_START)
 
     def beep_stop():
-        pass
+        if cfg["sound_enabled"]:
+            _play_mac(_WAV_STOP)
 
     def beep_done():
         if cfg["sound_enabled"]:
@@ -109,7 +128,8 @@ else:
             _play_async(_TONE_START)
 
     def beep_stop():
-        pass
+        if cfg["sound_enabled"]:
+            _play_async(_TONE_STOP)
 
     def beep_done():
         if cfg["sound_enabled"]:

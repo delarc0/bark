@@ -39,6 +39,13 @@ WM_KEYUP = 257
 WM_SYSKEYDOWN = 260
 WM_SYSKEYUP = 261
 KEYEVENTF_KEYUP = 0x2
+VK_CONTROL = 0x11
+VK_V = 0x56
+
+if IS_WIN:
+    def _send_key(vk, up=False):
+        flags = KEYEVENTF_KEYUP if up else 0
+        ctypes.windll.user32.keybd_event(vk, 0, flags, 0)
 
 # Mac trigger key mappings: keycode + flag mask
 _MAC_TRIGGER_KEYS = {
@@ -51,9 +58,10 @@ _TAP_DISABLED_BY_TIMEOUT = 0xFFFFFFFE
 
 
 class KeyboardHook:
-    def __init__(self, on_record_start, on_record_stop):
+    def __init__(self, on_record_start, on_record_stop, on_paste_fail=None):
         self._on_record_start = on_record_start
         self._on_record_stop = on_record_stop
+        self._on_paste_fail = on_paste_fail
         self._pressed = False
         self._listener = None  # pynput Listener (Windows only)
         self._controller = keyboard.Controller()
@@ -233,6 +241,7 @@ class KeyboardHook:
         # Clipboard mode: just copy, don't paste
         if cfg["clipboard_mode"]:
             pyperclip.copy(text)
+            log.info("Clipboard mode: text copied (not pasted)")
             return
 
         try:
@@ -240,24 +249,41 @@ class KeyboardHook:
         except Exception:
             old_clipboard = ""
 
-        # Cmd+V on Mac, Ctrl+V on Windows
-        paste_modifier = keyboard.Key.cmd if IS_MAC else keyboard.Key.ctrl
-
         try:
             pyperclip.copy(text)
             time.sleep(cfg["paste_delay"])
-            self._controller.press(paste_modifier)
-            self._controller.press("v")
-            self._controller.release("v")
-            self._controller.release(paste_modifier)
+
+            if IS_WIN:
+                # Use SendInput directly - more reliable than pynput Controller
+                # when a low-level keyboard hook (Listener) is active
+                _send_key(VK_CONTROL)
+                _send_key(VK_V)
+                _send_key(VK_V, up=True)
+                _send_key(VK_CONTROL, up=True)
+            else:
+                # Mac: Cmd+V via pynput
+                self._controller.press(keyboard.Key.cmd)
+                self._controller.press("v")
+                self._controller.release("v")
+                self._controller.release(keyboard.Key.cmd)
+
             time.sleep(cfg["paste_delay"])
+            log.info(f"Pasted {len(text)} chars via {'SendInput' if IS_WIN else 'pynput'}")
         except Exception as e:
-            log.error(f"Paste failed: {e}")
-        finally:
-            try:
-                pyperclip.copy(old_clipboard)
-            except Exception:
-                pass
+            log.error(f"Paste failed: {e}", exc_info=True)
+            # Leave text in clipboard so user can paste manually
+            if self._on_paste_fail:
+                try:
+                    self._on_paste_fail()
+                except Exception:
+                    pass
+            return
+
+        # Restore clipboard only on success
+        try:
+            pyperclip.copy(old_clipboard)
+        except Exception:
+            pass
 
     def start(self) -> bool:
         """Start keyboard monitoring. Returns True on success, False on failure."""

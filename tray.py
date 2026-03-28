@@ -112,6 +112,8 @@ _TAG_STREAM = 5
 _TAG_STARTUP = 6
 _TAG_HISTORY = 7
 _TAG_QUIT = 8
+_TAG_CUSTOM_WORDS = 9
+_TAG_UPDATE = 10
 _TAG_LANG = 100    # 100 + index into ALL_LANGUAGES
 _TAG_TRIGGER = 200  # 200 + index into TRIGGER_KEYS_MAC
 
@@ -128,6 +130,7 @@ class SystemTray:
         self._mac_target = None
         self._mac_delegate = None
         self._state = "loading"
+        self._update_version = None  # Set when a newer version is available
         # Queue for actions dispatched from ObjC callbacks (NSMenu).
         # Calling _root.after() from inside an NSMenu modal loop crashes
         # Tcl/Cocoa, so ObjC callbacks put work here and the main thread
@@ -277,6 +280,8 @@ class SystemTray:
         _mac_callbacks[_TAG_STREAM] = self._toggle_streaming
         _mac_callbacks[_TAG_STARTUP] = self._toggle_startup
         _mac_callbacks[_TAG_HISTORY] = self._open_history
+        _mac_callbacks[_TAG_CUSTOM_WORDS] = self._open_custom_words
+        _mac_callbacks[_TAG_UPDATE] = self._open_update
         _mac_callbacks[_TAG_QUIT] = lambda: self._action_queue.put(self._quit)
 
         # Show Overlay toggle
@@ -339,6 +344,9 @@ class SystemTray:
 
         self._add_item(menu, "Start on Login", _TAG_STARTUP, checked=cfg["start_on_login"])
         self._add_item(menu, "History", _TAG_HISTORY)
+        self._add_item(menu, "Custom Words", _TAG_CUSTOM_WORDS)
+        if self._update_version:
+            self._add_item(menu, f"Update Available (v{self._update_version})", _TAG_UPDATE)
 
         menu.addItem_(NSMenuItem.separatorItem())
 
@@ -479,6 +487,8 @@ class SystemTray:
         _ID_STARTUP = 6
         _ID_HISTORY = 7
         _ID_QUIT = 8
+        _ID_CUSTOM_WORDS = 9
+        _ID_UPDATE = 10
         _ID_LANG_BASE = 100   # 100 + i
         _ID_TRIGGER_BASE = 200  # 200 + i
 
@@ -503,6 +513,8 @@ class SystemTray:
             _ID_STREAMING: self._toggle_streaming,
             _ID_STARTUP: self._toggle_startup,
             _ID_HISTORY: self._open_history,
+            _ID_CUSTOM_WORDS: self._open_custom_words,
+            _ID_UPDATE: self._open_update,
             _ID_QUIT: self._quit,
         }
         for i, (code, _name) in enumerate(ALL_LANGUAGES):
@@ -552,6 +564,10 @@ class SystemTray:
             _user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
             _user32.AppendMenuW(hmenu, MF_STRING, _ID_STARTUP, startup_text)
             _user32.AppendMenuW(hmenu, MF_STRING, _ID_HISTORY, "History")
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_CUSTOM_WORDS, "Custom Words")
+            if tray._update_version:
+                _user32.AppendMenuW(hmenu, MF_STRING, _ID_UPDATE,
+                                    f"Update Available (v{tray._update_version})")
             _user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
             _user32.AppendMenuW(hmenu, MF_STRING, _ID_QUIT, "Quit")
             _apply_menu_bg(hmenu)
@@ -711,6 +727,42 @@ class SystemTray:
     def _open_history(self):
         from history import open_history
         open_history()
+
+    def _open_custom_words(self):
+        from transcriber import CUSTOM_WORDS_PATH
+        if not os.path.exists(CUSTOM_WORDS_PATH):
+            try:
+                with open(CUSTOM_WORDS_PATH, "w", encoding="utf-8") as f:
+                    f.write("# One word or phrase per line\n# These help Whisper recognize custom terms\n# Example:\n# Kubernetes\n# Lab37\n")
+            except Exception as e:
+                log.warning(f"Failed to create custom_words.txt: {e}")
+                return
+        try:
+            if IS_WIN:
+                os.startfile(CUSTOM_WORDS_PATH)
+            else:
+                import subprocess
+                subprocess.Popen(["open", CUSTOM_WORDS_PATH])
+        except Exception as e:
+            log.warning(f"Failed to open custom_words.txt: {e}")
+
+    def show_update(self, version: str):
+        """Notify user that a newer version is available."""
+        self._update_version = version
+        if IS_WIN and self._win32_nid:
+            import ctypes
+            NIF_INFO = 0x10
+            NIM_MODIFY = 0x01
+            self._win32_nid.uFlags = NIF_INFO
+            self._win32_nid.szInfo = f"Version {version} is available"
+            self._win32_nid.szInfoTitle = "Bark Update"
+            ctypes.windll.shell32.Shell_NotifyIconW(
+                NIM_MODIFY, ctypes.byref(self._win32_nid)
+            )
+
+    def _open_update(self):
+        import webbrowser
+        webbrowser.open("https://github.com/delarc0/bark/releases/latest")
 
     def _quit(self):
         if self._on_quit:
