@@ -186,6 +186,7 @@ def main():
             ctx["hook"] = KeyboardHook(
                 on_record_start=on_record_start,
                 on_record_stop=on_record_stop,
+                on_paste_fail=lambda: ui.set_sublabel("Paste failed, text in clipboard"),
             )
             if not ctx["hook"].start():
                 log.error("Keyboard hook failed to start. Check Accessibility permission.")
@@ -209,7 +210,9 @@ def main():
             ctx["recorder"] = AudioRecorder()
             ui.set_recorder(ctx["recorder"])
             ui.set_sublabel("WHISPER AI")
-            ctx["transcriber"] = Transcriber()
+            ctx["transcriber"] = Transcriber(
+                on_progress=lambda text: ui.set_sublabel(text),
+            )
             # Schedule on main thread so poll_keyboard's after() loop runs there
             ui._root.after(0, start_keyboard)
         except Exception as e:
@@ -237,6 +240,7 @@ def main():
         if latest:
             log.info(f"Update available: v{latest}")
             ui.set_sublabel(f"UPDATE v{latest}")
+            tray.show_update(latest)
 
     threading.Thread(target=_check_version, daemon=True).start()
 
