@@ -49,7 +49,7 @@ DEFAULT_CONFIG = {
     # Streaming preview
     "streaming_preview": False,
     # Version (read from VERSION file, this is the fallback)
-    "version": "1.3.1",
+    "version": "1.4.0",
 }
 
 
@@ -106,27 +106,37 @@ if IS_MAC:
     COMPUTE_TYPE = None
 else:
     MODEL_SIZE = "deepdml/faster-whisper-large-v3-turbo-ct2"
-    # Detect CUDA at runtime - fall back to CPU if unavailable
+    # Detect CUDA via the NVIDIA driver DLL (nvcuda.dll).  This avoids
+    # depending on torch CUDA libraries which add ~3 GB to the bundle.
+    # CTranslate2 (faster-whisper) ships its own CUDA libs separately.
+    _cuda_ok = False
+    _gpu_name = None
     try:
-        import torch
-        _cuda_ok = torch.cuda.is_available()
-    except Exception as _e:
-        _cuda_ok = False
-        log.warning(f"PyTorch import or CUDA check failed: {_e}")
+        import ctypes as _ct
+        _ct.cdll.LoadLibrary("nvcuda")
+        _cuda_ok = True
+    except Exception:
+        pass
+    if _cuda_ok:
+        # Get GPU name via nvidia-smi for logging
+        try:
+            import subprocess
+            _smi = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if _smi.returncode == 0 and _smi.stdout.strip():
+                _gpu_name = _smi.stdout.strip().split("\n")[0]
+        except Exception:
+            pass
     if _cuda_ok:
         DEVICE = "cuda"
         COMPUTE_TYPE = "float16"
-        log.info(f"CUDA available: {torch.cuda.get_device_name(0)}")
+        log.info(f"CUDA available{': ' + _gpu_name if _gpu_name else ''}")
     else:
         DEVICE = "cpu"
         COMPUTE_TYPE = "int8"
-        # Log diagnostics to help debug GPU detection issues remotely
         _diag = ["CUDA not available - using CPU mode (slower transcription)"]
-        try:
-            _diag.append(f"  PyTorch version: {torch.__version__}")
-            _diag.append(f"  PyTorch CUDA build: {torch.version.cuda or 'None (CPU-only build)'}")
-        except Exception:
-            _diag.append("  Could not read PyTorch version info")
         try:
             import subprocess
             _smi = subprocess.run(
@@ -135,8 +145,7 @@ else:
             )
             if _smi.returncode == 0 and _smi.stdout.strip():
                 _diag.append(f"  nvidia-smi: {_smi.stdout.strip()}")
-                _diag.append("  GPU exists but CUDA is not working in Python.")
-                _diag.append("  Fix: update NVIDIA drivers or reinstall with setup-win.bat")
+                _diag.append("  GPU exists but nvcuda.dll not loadable.")
             else:
                 _diag.append("  nvidia-smi: not found or no output")
         except Exception:

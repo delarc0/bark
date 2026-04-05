@@ -431,7 +431,9 @@ class Overlay:
 
         self.root.deiconify()
         self.root.lift()
-        self.root.attributes("-topmost", True)
+        # topmost already set at window creation (line 239) -- don't re-set
+        # it here; SetWindowPos(HWND_TOPMOST) causes desktop-wide z-order
+        # recalc which makes other windows flash/repaint.
 
     def _update_layered(self, img):
         if not self._hwnd or not self._bits:
@@ -819,10 +821,9 @@ class Overlay:
             log.warning(f"Cocoa styling failed: {e}")
 
     def _keep_on_top(self):
-        if self._visible:
+        if self._visible and self._opacity > 0.01:
             try:
                 self.root.lift()
-                self.root.attributes("-topmost", True)
             except Exception:
                 pass
         self._root.after(3000, self._keep_on_top)
@@ -998,8 +999,6 @@ class Overlay:
                     pass
             # Windows: window stays mapped (never withdrawn), just lift it
             self.root.lift()
-            if IS_WIN:
-                self.root.attributes("-topmost", True)
             if not self._anim_job:
                 self._animate()
         self._opacity_target = 1.0

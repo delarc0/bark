@@ -2,7 +2,10 @@
 ; Build: Run build-release.bat (or manually: pyinstaller bark.spec --clean, then ISCC this file)
 ; Output: build\Bark-{version}-Setup.exe
 
-#define AppVersion "1.3.1"
+; Read version from VERSION file (single source of truth)
+#define VerFile FileOpen(SourcePath + "\..\VERSION")
+#define AppVersion Trim(FileRead(VerFile))
+#expr FileClose(VerFile)
 
 [Setup]
 AppName=Bark
