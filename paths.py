@@ -4,6 +4,7 @@ import os
 import sys
 
 _FROZEN = getattr(sys, "frozen", False)
+_IS_WIN = sys.platform == "win32"
 
 
 def get_app_dir():
@@ -26,3 +27,12 @@ def get_data_dir():
     if _FROZEN:
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def open_file(path):
+    """Open a file in the OS default application."""
+    if _IS_WIN:
+        os.startfile(path)
+    else:
+        import subprocess
+        subprocess.Popen(["open", path])

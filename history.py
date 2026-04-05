@@ -2,7 +2,6 @@ import logging
 import os
 from datetime import datetime
 
-from config import IS_WIN
 from paths import get_data_dir
 
 log = logging.getLogger(__name__)
@@ -38,10 +37,7 @@ def open_history():
     if not os.path.exists(HISTORY_PATH):
         return
     try:
-        if IS_WIN:
-            os.startfile(HISTORY_PATH)
-        else:
-            import subprocess
-            subprocess.Popen(["open", HISTORY_PATH])
+        from paths import open_file
+        open_file(HISTORY_PATH)
     except Exception as e:
         log.warning(f"Failed to open history: {e}")

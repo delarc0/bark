@@ -475,11 +475,9 @@ class Overlay:
                     self.root.attributes("-alpha", 0.0)
                 except tk.TclError:
                     pass
-            # Windows: don't withdraw layered windows either -- withdraw/
-            # deiconify can leave the HWND in a broken state where
-            # UpdateLayeredWindow paints nothing. Keep window mapped but
-            # fully transparent; the alpha-0 frame is free for DWM.
-            self._anim_job = self._root.after(100, self._animate)
+            # Don't withdraw on either platform -- just stop the animation
+            # loop.  show_overlay() restarts it when needed.
+            self._anim_job = None
             return
 
         # Mac: animate window-level alpha for idle fade
