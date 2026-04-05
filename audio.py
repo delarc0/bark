@@ -44,10 +44,9 @@ class AudioRecorder:
 
     def _load_vad(self):
         log.info("Loading Silero VAD...")
-        if getattr(sys, "frozen", False):
-            # Frozen mode: load pre-saved JIT model bundled by PyInstaller
-            from paths import get_app_dir
-            model_path = os.path.join(get_app_dir(), "silero_vad.jit")
+        from paths import get_app_dir
+        model_path = os.path.join(get_app_dir(), "silero_vad.jit")
+        if os.path.exists(model_path):
             self._vad_model = torch.jit.load(model_path)
         else:
             self._vad_model, _ = torch.hub.load(
