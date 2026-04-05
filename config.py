@@ -109,8 +109,20 @@ else:
     # Detect CUDA via the NVIDIA driver DLL (nvcuda.dll).  This avoids
     # depending on torch CUDA libraries which add ~3 GB to the bundle.
     # CTranslate2 (faster-whisper) ships its own CUDA libs separately.
+    def _query_nvidia_smi(query="name,driver_version"):
+        try:
+            import subprocess
+            r = subprocess.run(
+                ["nvidia-smi", f"--query-gpu={query}", "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip().split("\n")[0]
+        except Exception:
+            pass
+        return None
+
     _cuda_ok = False
-    _gpu_name = None
     try:
         import ctypes as _ct
         _ct.cdll.LoadLibrary("nvcuda")
@@ -118,38 +130,20 @@ else:
     except Exception:
         pass
     if _cuda_ok:
-        # Get GPU name via nvidia-smi for logging
-        try:
-            import subprocess
-            _smi = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if _smi.returncode == 0 and _smi.stdout.strip():
-                _gpu_name = _smi.stdout.strip().split("\n")[0]
-        except Exception:
-            pass
-    if _cuda_ok:
         DEVICE = "cuda"
         COMPUTE_TYPE = "float16"
+        _gpu_name = _query_nvidia_smi("name")
         log.info(f"CUDA available{': ' + _gpu_name if _gpu_name else ''}")
     else:
         DEVICE = "cpu"
         COMPUTE_TYPE = "int8"
         _diag = ["CUDA not available - using CPU mode (slower transcription)"]
-        try:
-            import subprocess
-            _smi = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if _smi.returncode == 0 and _smi.stdout.strip():
-                _diag.append(f"  nvidia-smi: {_smi.stdout.strip()}")
-                _diag.append("  GPU exists but nvcuda.dll not loadable.")
-            else:
-                _diag.append("  nvidia-smi: not found or no output")
-        except Exception:
-            _diag.append("  nvidia-smi: not reachable")
+        _smi_out = _query_nvidia_smi()
+        if _smi_out:
+            _diag.append(f"  nvidia-smi: {_smi_out}")
+            _diag.append("  GPU exists but nvcuda.dll not loadable.")
+        else:
+            _diag.append("  nvidia-smi: not found or no output")
         for _line in _diag:
             log.warning(_line)
 

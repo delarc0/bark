@@ -730,6 +730,7 @@ class SystemTray:
 
     def _open_custom_words(self):
         from transcriber import CUSTOM_WORDS_PATH
+        from paths import open_file
         if not os.path.exists(CUSTOM_WORDS_PATH):
             try:
                 with open(CUSTOM_WORDS_PATH, "w", encoding="utf-8") as f:
@@ -738,11 +739,7 @@ class SystemTray:
                 log.warning(f"Failed to create custom_words.txt: {e}")
                 return
         try:
-            if IS_WIN:
-                os.startfile(CUSTOM_WORDS_PATH)
-            else:
-                import subprocess
-                subprocess.Popen(["open", CUSTOM_WORDS_PATH])
+            open_file(CUSTOM_WORDS_PATH)
         except Exception as e:
             log.warning(f"Failed to open custom_words.txt: {e}")
 

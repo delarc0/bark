@@ -9,17 +9,26 @@ log = logging.getLogger(__name__)
 
 CUSTOM_WORDS_PATH = os.path.join(get_data_dir(), "custom_words.txt")
 
+# Cached prompt -- reloaded when file mtime changes
+_prompt_cache: str | None = None
+_prompt_mtime: float = 0.0
+
 
 def _load_initial_prompt() -> str | None:
     """Load custom vocabulary from custom_words.txt and format as initial_prompt."""
-    if not os.path.exists(CUSTOM_WORDS_PATH):
+    global _prompt_cache, _prompt_mtime
+    try:
+        mtime = os.path.getmtime(CUSTOM_WORDS_PATH)
+    except OSError:
         return None
+    if mtime == _prompt_mtime:
+        return _prompt_cache
     try:
         with open(CUSTOM_WORDS_PATH, "r", encoding="utf-8") as f:
             words = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-        if not words:
-            return None
-        return "Context words: " + ", ".join(words)
+        _prompt_mtime = mtime
+        _prompt_cache = ("Context words: " + ", ".join(words)) if words else None
+        return _prompt_cache
     except Exception:
         return None
 
