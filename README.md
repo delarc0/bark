@@ -118,6 +118,8 @@ Download and run **Bark-Setup.exe** from the [latest release](https://github.com
 
 After install, search **"Bark"** in the Start Menu or use the Desktop shortcut.
 
+Installing with an AI agent (Claude, etc.)? Point it at [AGENTS.md](AGENTS.md).
+
 > **Note:** Windows SmartScreen may show an "Unknown Publisher" warning. Click "More info" then "Run anyway". This is because the installer is not code-signed (yet).
 
 <details>
