@@ -10,3 +10,9 @@ dist/
 silero_vad.jit
 Bark.app/
 *.iconset/
+
+# Runtime state (per-machine, not for the repo)
+.bark.lock
+bark_config.json
+bark_history.txt
+tasks/
