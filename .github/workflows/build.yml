@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,13 +20,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install PyTorch (CUDA 12.1)
-        run: pip install torch --index-url https://download.pytorch.org/whl/cu121
+      # CPU torch on purpose: torch is only used for Silero VAD (CPU work).
+      # CTranslate2 (faster-whisper) ships its own CUDA libs via the
+      # nvidia-* wheels below, which bark.spec collects into the bundle.
+      # This mirrors build-release.bat and saves ~3 GB in the bundle.
+      - name: Install PyTorch (CPU)
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
+          pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12 nvidia-cufft-cu12
           pip install pyinstaller
 
       - name: Pre-save Silero VAD model
@@ -45,6 +50,10 @@ jobs:
           if (!(Test-Path "dist\Bark\Bark.exe")) { throw "Bark.exe not found" }
           $size = (Get-Item "dist\Bark\Bark.exe").Length
           Write-Host "Bark.exe size: $size bytes"
+          $cudnn = Get-ChildItem "dist\Bark\_internal" -Filter "cudnn*.dll" -ErrorAction SilentlyContinue
+          if (!$cudnn) { $cudnn = Get-ChildItem "dist\Bark" -Filter "cudnn*.dll" -ErrorAction SilentlyContinue }
+          if (!$cudnn) { throw "cuDNN DLLs missing from bundle - GPU transcription would break" }
+          Write-Host "cuDNN DLLs bundled: $($cudnn.Count)"
         shell: pwsh
 
       - name: Install Inno Setup
@@ -54,9 +63,19 @@ jobs:
       - name: Build installer
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\bark-installer.iss
+          if (!(Test-Path "installer\build\Bark-*-Setup.exe")) { throw "Installer not produced" }
         shell: pwsh
 
+      - name: Upload installer artifact (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bark-installer
+          path: installer/build/Bark-*-Setup.exe
+          retention-days: 3
+
       - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: installer/build/Bark-*-Setup.exe
