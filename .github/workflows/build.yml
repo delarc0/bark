@@ -24,8 +24,10 @@ jobs:
       # CTranslate2 (faster-whisper) ships its own CUDA libs via the
       # nvidia-* wheels below, which bark.spec collects into the bundle.
       # This mirrors build-release.bat and saves ~3 GB in the bundle.
+      # torchaudio: silero-vad's hub loader imports it (build-time only;
+      # bark.spec excludes it from the bundle)
       - name: Install PyTorch (CPU)
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install dependencies
         run: |
