@@ -88,6 +88,10 @@ def main():
     def recover_gpu_wedge(timeout):
         """A transcription call hung past the watchdog. Assume a wedged GPU:
         persist CPU mode, abandon the hung call, rebuild the model on CPU."""
+        with lock:
+            if ctx.get("recovering"):
+                return
+            ctx["recovering"] = True
         log.error(
             f"Transcription hung >{timeout:.0f}s - assuming GPU wedge. "
             "Switching to CPU mode (persisted; undo via tray > Use CPU)."
@@ -107,7 +111,10 @@ def main():
                 ui.set_sublabel("CPU MODE (GPU HUNG)")
             except Exception:
                 log.exception("CPU rebuild after GPU wedge failed")
+                beep_error()
                 ui.set_state("error")
+            finally:
+                ctx["recovering"] = False
 
         threading.Thread(target=_rebuild, daemon=True).start()
 

@@ -293,12 +293,16 @@ class KeyboardHook:
             return
 
         # Restore clipboard only on success, and only if nothing else wrote
-        # to it since our copy (don't clobber a clipboard manager's work)
-        current_seq = self._clipboard_seq()
-        if (seq_after_copy is not None and current_seq is not None
-                and current_seq != seq_after_copy):
-            log.info("Clipboard changed by another app - skipping restore")
-            return
+        # to it since our copy (don't clobber a clipboard manager's work).
+        # On Windows, if the sequence number can't be read, skip the restore:
+        # clobbering someone's clipboard is worse than leaving ours in place.
+        if IS_WIN:
+            current_seq = self._clipboard_seq()
+            if (seq_after_copy is None or current_seq is None
+                    or current_seq != seq_after_copy):
+                if current_seq != seq_after_copy:
+                    log.info("Clipboard changed by another app - skipping restore")
+                return
         try:
             pyperclip.copy(old_clipboard)
         except Exception:
