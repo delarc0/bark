@@ -2,16 +2,71 @@ import logging
 import os
 import re
 import numpy as np
-from config import cfg, MODEL_SIZE, DEVICE, COMPUTE_TYPE, SAMPLE_RATE, IS_MAC
+from config import cfg, save_config, MODEL_SIZE, DEVICE, COMPUTE_TYPE, SAMPLE_RATE, IS_MAC
 from paths import get_data_dir
 
 log = logging.getLogger(__name__)
 
 CUSTOM_WORDS_PATH = os.path.join(get_data_dir(), "custom_words.txt")
+REPLACEMENTS_PATH = os.path.join(get_data_dir(), "replacements.txt")
 
 # Cached prompt -- reloaded when file mtime changes
 _prompt_cache: str | None = None
 _prompt_mtime: float = 0.0
+
+# Cached replacements -- (compiled_regex, {lowercased_find: replace})
+_repl_cache: tuple | None = None
+_repl_mtime: float = 0.0
+
+
+def _load_replacements():
+    """Load deterministic find/replace pairs from replacements.txt.
+
+    One pair per line: `find = replace`. Matching is word-boundary and
+    case-insensitive; longest key wins when rules overlap; the replacement is
+    inserted as literal text (no regex template expansion).
+    """
+    global _repl_cache, _repl_mtime
+    try:
+        mtime = os.path.getmtime(REPLACEMENTS_PATH)
+    except OSError:
+        return None
+    if mtime == _repl_mtime:
+        return _repl_cache
+    pairs = {}
+    try:
+        with open(REPLACEMENTS_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                find, _, replace = line.partition("=")
+                find = find.strip()
+                if find:
+                    pairs[find.lower()] = replace.strip()
+    except Exception:
+        return None
+    _repl_mtime = mtime
+    if not pairs:
+        _repl_cache = None
+        return None
+    # Longest-first so overlapping rules resolve deterministically
+    keys = sorted(pairs, key=len, reverse=True)
+    pattern = re.compile(
+        r"(?<!\w)(" + "|".join(re.escape(k) for k in keys) + r")(?!\w)",
+        re.IGNORECASE,
+    )
+    _repl_cache = (pattern, pairs)
+    return _repl_cache
+
+
+def _apply_replacements(text: str) -> str:
+    loaded = _load_replacements()
+    if not loaded:
+        return text
+    pattern, pairs = loaded
+    # Lambda keeps the replacement literal ($, \ etc. must not expand)
+    return pattern.sub(lambda m: pairs[m.group(1).lower()], text)
 
 
 def _load_initial_prompt() -> str | None:
@@ -74,8 +129,9 @@ def _fix_punctuation(text: str) -> str:
     text = re.sub(r"([.!?])\1+", r"\1", text)
     # Remove space before punctuation
     text = re.sub(r"\s+([.!?,;:])", r"\1", text)
-    # Capitalize after sentence-ending punctuation
-    text = re.sub(r"([.!?])\s+([a-z])", lambda m: m.group(1) + " " + m.group(2).upper(), text)
+    # Capitalize after sentence-ending punctuation (\w so å/ä/ö work; upper() is
+    # a no-op on digits and already-uppercase letters)
+    text = re.sub(r"([.!?])\s+(\w)", lambda m: m.group(1) + " " + m.group(2).upper(), text)
     # Remove repeated adjacent words (case-insensitive)
     text = re.sub(r"\b(\w+)\s+\1\b", r"\1", text, flags=re.IGNORECASE)
     return text
@@ -97,9 +153,17 @@ def clean_text(text: str) -> str:
     # Remove filler words
     text = FILLER_WORDS.sub("", text)
 
+    # Deterministic vocabulary corrections (replacements.txt)
+    text = _apply_replacements(text)
+
     # Collapse multiple spaces and fix punctuation
     text = re.sub(r"  +", " ", text).strip()
+    # Filler removal can orphan leading punctuation ("Um, testing" -> ", testing")
+    text = re.sub(r"^[\s.,;:!?]+", "", text)
     text = _fix_punctuation(text)
+    # Capitalize the first word (lost when a leading filler word was stripped)
+    if text and text[0].islower():
+        text = text[0].upper() + text[1:]
 
     # Add trailing space so next dictation doesn't merge with previous
     if text and not text.endswith((" ", "\n")):
@@ -147,7 +211,9 @@ def _ensure_model_cached(on_progress=None):
 
 
 class Transcriber:
-    def __init__(self, on_progress=None):
+    def __init__(self, on_progress=None, device=None):
+        """device overrides the auto-detected DEVICE (used for CPU rebuild
+        after a GPU wedge)."""
         if IS_MAC:
             import mlx_whisper
             self._mlx = mlx_whisper
@@ -164,37 +230,41 @@ class Transcriber:
 
             _ensure_model_cached(on_progress=on_progress)
 
-            log.info(f"Loading model '{MODEL_SIZE}' on {DEVICE} ({COMPUTE_TYPE})...")
+            _device = device or DEVICE
+            _compute = "int8" if _device == "cpu" else COMPUTE_TYPE
+            log.info(f"Loading model '{MODEL_SIZE}' on {_device} ({_compute})...")
             try:
                 self.model = WhisperModel(
                     MODEL_SIZE,
-                    device=DEVICE,
-                    compute_type=COMPUTE_TYPE,
+                    device=_device,
+                    compute_type=_compute,
                 )
             except Exception as e:
-                if DEVICE == "cuda":
+                if _device == "cuda":
                     log.warning(f"CUDA init failed: {e} - falling back to CPU")
                     self.model = WhisperModel(
                         MODEL_SIZE,
                         device="cpu",
                         compute_type="int8",
                     )
+                    # Persist so the next launch skips the broken CUDA attempt.
+                    # User can undo via tray > Use CPU once the GPU is healthy.
+                    if not cfg["force_cpu"]:
+                        cfg["force_cpu"] = True
+                        save_config()
+                        log.warning("Persisted CPU mode (disable via tray > Use CPU)")
                 else:
                     raise
         log.info("Model loaded.")
 
     def transcribe(self, audio: np.ndarray) -> str:
+        """Raises on failure -- the caller owns error feedback (beep + UI)."""
         if len(audio) == 0:
             return ""
 
-        try:
-            if IS_MAC:
-                return self._transcribe_mlx(audio)
-            else:
-                return self._transcribe_faster_whisper(audio)
-        except Exception as e:
-            log.error(f"Transcription failed: {e}")
-            return ""
+        if IS_MAC:
+            return self._transcribe_mlx(audio)
+        return self._transcribe_faster_whisper(audio)
 
     def _transcribe_mlx(self, audio: np.ndarray) -> str:
         kwargs = dict(

@@ -22,6 +22,9 @@ DEFAULT_CONFIG = {
     # Model
     "language": None,           # None = auto-detect
     "beam_size": 5,
+    # Set (and persisted) automatically when a GPU wedge is detected, or
+    # manually via the tray menu. Overrides CUDA detection.
+    "force_cpu": False,
     # Audio
     "sample_rate": 16000,
     "min_audio_duration": 0.3,
@@ -123,13 +126,18 @@ else:
         return None
 
     _cuda_ok = False
-    try:
-        import ctypes as _ct
-        _ct.cdll.LoadLibrary("nvcuda")
-        _cuda_ok = True
-    except Exception:
-        pass
-    if _cuda_ok:
+    if not cfg["force_cpu"]:
+        try:
+            import ctypes as _ct
+            _ct.cdll.LoadLibrary("nvcuda")
+            _cuda_ok = True
+        except Exception:
+            pass
+    if cfg["force_cpu"]:
+        DEVICE = "cpu"
+        COMPUTE_TYPE = "int8"
+        log.info("CPU mode forced by config (tray > Use CPU, or previous GPU hang)")
+    elif _cuda_ok:
         DEVICE = "cuda"
         COMPUTE_TYPE = "float16"
         _gpu_name = _query_nvidia_smi("name")

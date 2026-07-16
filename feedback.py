@@ -50,6 +50,20 @@ def _generate_falling_boop(volume: float) -> np.ndarray:
     return _make_samples(samples)
 
 
+def _generate_error_buzz(volume: float) -> np.ndarray:
+    """Falling two-tone buzz -- unmistakably 'something went wrong'."""
+    samples = []
+    for freq, duration_ms in ((440, 90), (300, 130)):
+        n = int(_BEEP_RATE * duration_ms / 1000)
+        for i in range(n):
+            t = i / _BEEP_RATE
+            progress = i / n
+            env = math.sin(math.pi * progress)  # smooth fade in/out per tone
+            s = math.sin(2 * math.pi * freq * t)
+            samples.append(volume * env * s)
+    return _make_samples(samples)
+
+
 def _generate_tick(volume: float) -> np.ndarray:
     """Short neutral tick -- confirms recording stopped, processing begins."""
     duration_ms = 50
@@ -69,6 +83,7 @@ def _generate_tick(volume: float) -> np.ndarray:
 _TONE_START = _generate_rising_chirp(cfg["beep_volume"] * 0.45)
 _TONE_STOP = _generate_tick(cfg["beep_volume"] * 0.35)
 _TONE_DONE = _generate_falling_boop(cfg["beep_volume"] * 0.35)
+_TONE_ERROR = _generate_error_buzz(cfg["beep_volume"] * 0.45)
 
 
 def _save_wav(data: np.ndarray, path: str):
@@ -88,9 +103,11 @@ if IS_MAC:
     _WAV_START = os.path.join(_wav_dir, "start.wav")
     _WAV_STOP = os.path.join(_wav_dir, "stop.wav")
     _WAV_DONE = os.path.join(_wav_dir, "done.wav")
+    _WAV_ERROR = os.path.join(_wav_dir, "error.wav")
     _save_wav(_TONE_START, _WAV_START)
     _save_wav(_TONE_STOP, _WAV_STOP)
     _save_wav(_TONE_DONE, _WAV_DONE)
+    _save_wav(_TONE_ERROR, _WAV_ERROR)
 
     def _play_mac(path: str):
         try:
@@ -114,6 +131,10 @@ if IS_MAC:
         if cfg["sound_enabled"]:
             _play_mac(_WAV_DONE)
 
+    def beep_error():
+        if cfg["sound_enabled"]:
+            _play_mac(_WAV_ERROR)
+
 else:
     import sounddevice as sd
 
@@ -134,3 +155,7 @@ else:
     def beep_done():
         if cfg["sound_enabled"]:
             _play_async(_TONE_DONE)
+
+    def beep_error():
+        if cfg["sound_enabled"]:
+            _play_async(_TONE_ERROR)

@@ -16,6 +16,10 @@ log = logging.getLogger(__name__)
 VAD_CHUNK_SAMPLES = 512
 SPEECH_MIN_DURATION = 0.3  # Must detect speech before auto-stop kicks in
 
+# Hard cap: with auto-stop off, a stuck trigger key would record unbounded.
+# Force-finishes (still transcribes what was captured).
+MAX_RECORD_SECONDS = 300
+
 # Pre-buffer: keep last N chunks. At 16kHz with ~512-sample callbacks,
 # 0.5s = ~16 callbacks. Use generous maxlen to handle varying chunk sizes.
 _PRE_BUFFER_MAXLEN = max(int(SAMPLE_RATE * cfg["pre_buffer"] / 256) + 5, 20)
@@ -35,6 +39,9 @@ class AudioRecorder:
         self._stopped = False
         self._recording = False
         self._current_level = 0.0
+        self._on_max_duration = None
+        self._recorded_samples = 0
+        self._max_fired = False
         self._lock = threading.Lock()
         # VAD runs on its own thread, fed by a queue from the audio callback
         self._vad_queue: queue.Queue[np.ndarray | None] = queue.Queue()
@@ -74,7 +81,7 @@ class AudioRecorder:
         self._stream.start()
         log.info("Mic stream started (pre-buffering).")
 
-    def start(self, on_silence=None):
+    def start(self, on_silence=None, on_max_duration=None):
         with self._lock:
             # Grab pre-buffer as initial recording chunks
             pre_samples = int(cfg["pre_buffer"] * SAMPLE_RATE)
@@ -93,6 +100,9 @@ class AudioRecorder:
                 self._chunks = []
 
             self._on_silence = on_silence
+            self._on_max_duration = on_max_duration
+            self._recorded_samples = 0
+            self._max_fired = False
             self._vad_buffer = np.zeros(0, dtype=np.float32)
             self._silence_samples = 0
             self._speech_detected = False
@@ -160,6 +170,15 @@ class AudioRecorder:
             # Recording mode - collect chunks + feed VAD queue
             self._chunks.append(data)
             self._current_level = min(1.0, float(np.sqrt(np.mean(data ** 2))) * 12)
+            self._recorded_samples += frames
+            if (
+                not self._max_fired
+                and self._recorded_samples >= MAX_RECORD_SECONDS * SAMPLE_RATE
+            ):
+                # Failsafe (e.g. stuck trigger key with auto-stop off).
+                # Heavy work happens off the audio callback thread.
+                self._max_fired = True
+                threading.Thread(target=self._force_finish, daemon=True).start()
             if self._on_silence is not None:
                 try:
                     self._vad_queue.put_nowait(data)
@@ -180,6 +199,23 @@ class AudioRecorder:
             if not self._recording or not self._chunks:
                 return np.array([], dtype=np.float32)
             return np.concatenate(self._chunks, axis=0).flatten().copy()
+
+    def _force_finish(self):
+        """Max-duration failsafe hit: finish the recording like auto-stop does,
+        keeping what was captured."""
+        with self._lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            self._recording = False
+            if self._chunks:
+                self._stopped_audio = np.concatenate(self._chunks, axis=0).flatten()
+                self._chunks = []
+            else:
+                self._stopped_audio = np.array([], dtype=np.float32)
+        log.warning(f"Max recording duration reached ({MAX_RECORD_SECONDS}s) - force-finishing.")
+        if self._on_max_duration is not None:
+            self._on_max_duration()
 
     def _vad_worker(self):
         """Dedicated thread for VAD inference. Drains _vad_queue."""

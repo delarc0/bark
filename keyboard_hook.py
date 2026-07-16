@@ -237,6 +237,18 @@ class KeyboardHook:
         except Exception as e:
             log.error(f"Record stop failed: {e}")
 
+    @staticmethod
+    def _clipboard_seq():
+        """Windows clipboard sequence number -- bumps on every clipboard write.
+        Used to avoid clobbering something written by another app (clipboard
+        manager, copy-on-select) between our copy and our restore."""
+        if IS_WIN:
+            try:
+                return ctypes.windll.user32.GetClipboardSequenceNumber()
+            except Exception:
+                return None
+        return None
+
     def type_text(self, text: str):
         # Clipboard mode: just copy, don't paste
         if cfg["clipboard_mode"]:
@@ -251,6 +263,7 @@ class KeyboardHook:
 
         try:
             pyperclip.copy(text)
+            seq_after_copy = self._clipboard_seq()
             time.sleep(cfg["paste_delay"])
 
             if IS_WIN:
@@ -279,7 +292,13 @@ class KeyboardHook:
                     pass
             return
 
-        # Restore clipboard only on success
+        # Restore clipboard only on success, and only if nothing else wrote
+        # to it since our copy (don't clobber a clipboard manager's work)
+        current_seq = self._clipboard_seq()
+        if (seq_after_copy is not None and current_seq is not None
+                and current_seq != seq_after_copy):
+            log.info("Clipboard changed by another app - skipping restore")
+            return
         try:
             pyperclip.copy(old_clipboard)
         except Exception:

@@ -48,12 +48,12 @@ if IS_WIN and not getattr(sys, "frozen", False):
 from audio import AudioRecorder
 from transcriber import Transcriber
 from keyboard_hook import KeyboardHook
-from feedback import beep_start, beep_stop, beep_done
+from feedback import beep_start, beep_stop, beep_done, beep_error
 from overlay import Overlay
 from tray import SystemTray
 from history import append_history
 from version_check import check_for_update
-from config import cfg, IS_MAC, SAMPLE_RATE, TRIGGER_KEY_NAME
+from config import cfg, save_config, IS_MAC, SAMPLE_RATE, TRIGGER_KEY_NAME
 
 
 def main():
@@ -70,8 +70,6 @@ def main():
     tray = SystemTray(overlay=ui, on_quit=on_quit)
     ui.set_tray(tray)
     lock = threading.Lock()
-    # Serialize MLX/whisper access -- Metal crashes if two threads submit GPU work
-    transcribe_lock = threading.Lock()
 
     # All mutable state in one dict - avoids nonlocal closure issues
     ctx = {
@@ -81,7 +79,37 @@ def main():
         "tray": tray,
         "ready": False,
         "recording": False,
+        # Serialize MLX/whisper access -- two threads submitting GPU work
+        # crashes. Lives in ctx so wedge recovery can swap in a fresh lock
+        # (the orphaned hung thread never releases the old one).
+        "transcribe_lock": threading.Lock(),
     }
+
+    def recover_gpu_wedge(timeout):
+        """A transcription call hung past the watchdog. Assume a wedged GPU:
+        persist CPU mode, abandon the hung call, rebuild the model on CPU."""
+        log.error(
+            f"Transcription hung >{timeout:.0f}s - assuming GPU wedge. "
+            "Switching to CPU mode (persisted; undo via tray > Use CPU)."
+        )
+        if not cfg["force_cpu"]:
+            cfg["force_cpu"] = True
+            save_config()
+        ctx["ready"] = False
+        ctx["transcribe_lock"] = threading.Lock()
+
+        def _rebuild():
+            try:
+                ctx["transcriber"] = Transcriber(device="cpu")
+                ctx["ready"] = True
+                log.info("Recovered on CPU after GPU wedge.")
+                ui.set_state("idle")
+                ui.set_sublabel("CPU MODE (GPU HUNG)")
+            except Exception:
+                log.exception("CPU rebuild after GPU wedge failed")
+                ui.set_state("error")
+
+        threading.Thread(target=_rebuild, daemon=True).start()
 
     def process_audio():
         audio = ctx["recorder"].stop()
@@ -96,8 +124,40 @@ def main():
 
         log.info(f"Transcribing {duration:.1f}s of audio...")
         t0 = time.time()
-        with transcribe_lock:
-            text = ctx["transcriber"].transcribe(audio)
+
+        # Run transcription on a watched worker thread. A wedged CUDA call
+        # (driver hiccup, OOM stall) would otherwise hang this thread forever.
+        # Note the model load is NOT inside this timeout -- only transcription.
+        result = {}
+        done = threading.Event()
+        tlock = ctx["transcribe_lock"]
+
+        def _worker():
+            try:
+                with tlock:
+                    result["text"] = ctx["transcriber"].transcribe(audio)
+            except Exception as e:
+                result["error"] = e
+            finally:
+                done.set()
+
+        threading.Thread(target=_worker, daemon=True).start()
+        watchdog = max(60.0, duration * 3)
+        if not done.wait(watchdog):
+            beep_error()
+            ui.set_state("error")
+            ui.set_sublabel("GPU HUNG - SWITCHING TO CPU")
+            recover_gpu_wedge(watchdog)
+            return
+        if "error" in result:
+            log.error(f"Transcription failed: {result['error']}",
+                      exc_info=result["error"])
+            beep_error()
+            ui.set_state("error")
+            ui.set_sublabel("TRANSCRIPTION FAILED")
+            return
+
+        text = result.get("text", "")
         elapsed = time.time() - t0
 
         if text:
@@ -123,12 +183,13 @@ def main():
                 if len(snapshot) < SAMPLE_RATE * 0.5:
                     continue
                 # Non-blocking: skip preview if main transcription owns the GPU
-                if not transcribe_lock.acquire(blocking=False):
+                tlock = ctx["transcribe_lock"]
+                if not tlock.acquire(blocking=False):
                     continue
                 try:
                     preview = ctx["transcriber"].transcribe_preview(snapshot)
                 finally:
-                    transcribe_lock.release()
+                    tlock.release()
                 if preview and ctx["recording"]:
                     snippet = preview[:30] + "..." if len(preview) > 30 else preview
                     ui.set_sublabel(snippet)
@@ -143,9 +204,10 @@ def main():
         beep_start()
         ui.set_state("recording")
         if cfg["auto_stop"]:
-            ctx["recorder"].start(on_silence=on_auto_stop)
+            ctx["recorder"].start(on_silence=on_auto_stop,
+                                  on_max_duration=on_max_duration)
         else:
-            ctx["recorder"].start()
+            ctx["recorder"].start(on_max_duration=on_max_duration)
         log.info("Recording started")
         if cfg["streaming_preview"]:
             threading.Thread(target=_streaming_preview_loop, daemon=True).start()
@@ -160,6 +222,7 @@ def main():
             process_audio()
         except Exception as e:
             log.error(f"Processing failed: {e}", exc_info=True)
+            beep_error()
             ui.set_state("idle")
 
     def on_auto_stop():
@@ -172,6 +235,20 @@ def main():
             process_audio()
         except Exception as e:
             log.error(f"Processing failed: {e}", exc_info=True)
+            beep_error()
+            ui.set_state("idle")
+
+    def on_max_duration():
+        with lock:
+            if not ctx["recording"]:
+                return
+            ctx["recording"] = False
+        log.info("Recording stopped (max duration failsafe)")
+        try:
+            process_audio()
+        except Exception as e:
+            log.error(f"Processing failed: {e}", exc_info=True)
+            beep_error()
             ui.set_state("idle")
 
     def poll_keyboard():
@@ -186,10 +263,14 @@ def main():
             ctx["hook"] = KeyboardHook(
                 on_record_start=on_record_start,
                 on_record_stop=on_record_stop,
-                on_paste_fail=lambda: ui.set_sublabel("Paste failed, text in clipboard"),
+                on_paste_fail=lambda: (
+                    beep_error(),
+                    ui.set_sublabel("Paste failed, text in clipboard"),
+                ),
             )
             if not ctx["hook"].start():
                 log.error("Keyboard hook failed to start. Check Accessibility permission.")
+                beep_error()
                 ui.set_state("error")
                 return
             ctx["ready"] = True
@@ -201,6 +282,7 @@ def main():
                 poll_keyboard()
         except Exception as e:
             log.error(f"Failed to start keyboard hook: {e}", exc_info=True)
+            beep_error()
             ui.set_state("error")
 
     def init_backend():
@@ -217,6 +299,7 @@ def main():
             ui._root.after(0, start_keyboard)
         except Exception as e:
             log.error(f"Failed to initialize: {e}", exc_info=True)
+            beep_error()
             ui.set_state("error")
             # Show error via tray notification (Windows) so user isn't left with nothing
             if IS_WIN and ctx.get("tray") and getattr(ctx["tray"], "_icon", None):

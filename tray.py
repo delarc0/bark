@@ -489,6 +489,8 @@ class SystemTray:
         _ID_QUIT = 8
         _ID_CUSTOM_WORDS = 9
         _ID_UPDATE = 10
+        _ID_FORCE_CPU = 11
+        _ID_REPLACEMENTS = 12
         _ID_LANG_BASE = 100   # 100 + i
         _ID_TRIGGER_BASE = 200  # 200 + i
 
@@ -515,6 +517,8 @@ class SystemTray:
             _ID_HISTORY: self._open_history,
             _ID_CUSTOM_WORDS: self._open_custom_words,
             _ID_UPDATE: self._open_update,
+            _ID_FORCE_CPU: self._toggle_force_cpu,
+            _ID_REPLACEMENTS: self._open_replacements,
             _ID_QUIT: self._quit,
         }
         for i, (code, _name) in enumerate(ALL_LANGUAGES):
@@ -561,10 +565,14 @@ class SystemTray:
             _user32.AppendMenuW(hmenu, MF_POPUP, htrigger, "Trigger Key")
 
             _user32.AppendMenuW(hmenu, MF_STRING, _ID_STREAMING, stream_text)
+            cpu_text = ("Use CPU (fixes GPU hangs): ON" if cfg["force_cpu"]
+                        else "Use CPU (fixes GPU hangs): OFF")
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_FORCE_CPU, cpu_text)
             _user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
             _user32.AppendMenuW(hmenu, MF_STRING, _ID_STARTUP, startup_text)
             _user32.AppendMenuW(hmenu, MF_STRING, _ID_HISTORY, "History")
             _user32.AppendMenuW(hmenu, MF_STRING, _ID_CUSTOM_WORDS, "Custom Words")
+            _user32.AppendMenuW(hmenu, MF_STRING, _ID_REPLACEMENTS, "Replacements")
             if tray._update_version:
                 _user32.AppendMenuW(hmenu, MF_STRING, _ID_UPDATE,
                                     f"Update Available (v{tray._update_version})")
@@ -699,6 +707,16 @@ class SystemTray:
         cfg["streaming_preview"] = not cfg["streaming_preview"]
         save_config()
 
+    def _toggle_force_cpu(self):
+        cfg["force_cpu"] = not cfg["force_cpu"]
+        save_config()
+        state = "ON" if cfg["force_cpu"] else "OFF"
+        log.info(f"Use CPU: {state} - restart Bark to apply.")
+        try:
+            self._overlay.set_sublabel(f"CPU MODE {state} - RESTART BARK")
+        except Exception:
+            pass
+
     def _make_language_handler(self, code):
         def handler():
             cfg["language"] = code
@@ -742,6 +760,27 @@ class SystemTray:
             open_file(CUSTOM_WORDS_PATH)
         except Exception as e:
             log.warning(f"Failed to open custom_words.txt: {e}")
+
+    def _open_replacements(self):
+        from transcriber import REPLACEMENTS_PATH
+        from paths import open_file
+        if not os.path.exists(REPLACEMENTS_PATH):
+            try:
+                with open(REPLACEMENTS_PATH, "w", encoding="utf-8") as f:
+                    f.write(
+                        "# One rule per line: find = replace\n"
+                        "# Word-boundary, case-insensitive, applied after every transcription\n"
+                        "# Example:\n"
+                        "# lab thirty seven = LAB37\n"
+                        "# jenny show = Jenny Show\n"
+                    )
+            except Exception as e:
+                log.warning(f"Failed to create replacements.txt: {e}")
+                return
+        try:
+            open_file(REPLACEMENTS_PATH)
+        except Exception as e:
+            log.warning(f"Failed to open replacements.txt: {e}")
 
     def show_update(self, version: str):
         """Notify user that a newer version is available."""
