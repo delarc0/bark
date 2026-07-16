@@ -17,8 +17,8 @@ rights needed; it installs per-user to `%LOCALAPPDATA%\Bark`.
 ```powershell
 $asset = (Invoke-RestMethod https://api.github.com/repos/delarc0/bark/releases/latest).assets |
   Where-Object name -like "*-Setup.exe" | Select-Object -First 1
-Invoke-WebRequest $asset.browser_download_url -OutFile "$env:TEMP\Bark-Setup.exe"
-Unblock-File "$env:TEMP\Bark-Setup.exe"
+curl.exe -L -o "$env:TEMP\Bark-Setup.exe" $asset.browser_download_url
+Unblock-File "$env:TEMP\Bark-Setup.exe" -ErrorAction SilentlyContinue
 Start-Process "$env:TEMP\Bark-Setup.exe" -ArgumentList "/SILENT" -Wait
 Start-Process "$env:LOCALAPPDATA\Bark\Bark.exe"
 ```
@@ -28,11 +28,13 @@ Notes:
 - The installer is large (~650 MB): it bundles Python, PyTorch/CUDA and all
   dependencies, so nothing else needs to be installed. The download is the
   slow part; tell the user.
-- `Unblock-File` clears Mark-of-the-Web so the unsigned installer runs
-  without a SmartScreen block. If the user runs the installer by
-  double-clicking instead, they will see "Unknown Publisher": click
-  **More info**, then **Run anyway**. That is expected; the installer is not
-  code-signed yet.
+- Use `curl.exe` (bundled with Windows 10/11) for the download, not
+  `Invoke-WebRequest`: it is much faster on large files and does not tag the
+  file with Mark-of-the-Web. `Unblock-File` stays as a belt-and-suspenders
+  step so SmartScreen never blocks the unsigned installer. If the user runs
+  the installer by double-clicking a browser-downloaded copy instead, they
+  will see "Unknown Publisher": click **More info**, then **Run anyway**.
+  That is expected; the installer is not code-signed yet.
 - `/SILENT` shows only a progress bar. Use `/VERYSILENT` for fully headless.
   Drop the flag entirely if the user wants the normal install wizard (it also
   offers a desktop shortcut).
