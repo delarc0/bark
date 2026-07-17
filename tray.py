@@ -245,6 +245,7 @@ class SystemTray:
                 "transcribing": NSColor.systemYellowColor(),
                 "done": NSColor.systemGreenColor(),
                 "error": NSColor.systemRedColor(),
+                "fatal": NSColor.systemRedColor(),
             }
             color = colors.get(self._state, NSColor.systemGreenColor())
             attrs = {
@@ -644,7 +645,6 @@ class SystemTray:
         nid.uCallbackMessage = WM_TRAYICON
         nid.hIcon = ctypes.cast(ctypes.c_void_p(hicon), wt.HICON)
         nid.szTip = "Bark - Voice Dictation"
-        self._win32_nid = nid
         self._win32_hwnd = hwnd
 
         ok = _shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
@@ -653,6 +653,9 @@ class SystemTray:
         else:
             log.error(f"Shell_NotifyIconW(NIM_ADD) failed: {_kernel32.GetLastError()}")
             return
+        # Publish only after NIM_ADD succeeded - notify() keys off this, and
+        # a NIM_MODIFY against an icon that was never added silently no-ops
+        self._win32_nid = nid
 
         # ---- Balloon notification ----
         trigger = cfg.get("trigger_key_win", "capslock")
@@ -782,34 +785,71 @@ class SystemTray:
         except Exception as e:
             log.warning(f"Failed to open replacements.txt: {e}")
 
-    def show_update(self, version: str):
-        """Notify user that a newer version is available."""
-        self._update_version = version
-        if IS_WIN and self._win32_nid:
+    def notify(self, title: str, message: str, _attempts: int = 20):
+        """Show a tray balloon notification (Windows only).
+
+        The tray icon is created on its own thread; a fast startup failure
+        can call this before _win32_nid exists, so retry briefly instead of
+        silently dropping the one message that explains the failure."""
+        if not IS_WIN:
+            return
+        if self._win32_nid:
             import ctypes
             NIF_INFO = 0x10
             NIM_MODIFY = 0x01
             self._win32_nid.uFlags = NIF_INFO
-            self._win32_nid.szInfo = f"Version {version} is available"
-            self._win32_nid.szInfoTitle = "Bark Update"
+            self._win32_nid.szInfo = message[:255]
+            self._win32_nid.szInfoTitle = title[:63]
             ctypes.windll.shell32.Shell_NotifyIconW(
                 NIM_MODIFY, ctypes.byref(self._win32_nid)
             )
+        elif _attempts > 0:
+            timer = threading.Timer(
+                0.5, self.notify, args=(title, message), kwargs={"_attempts": _attempts - 1}
+            )
+            timer.daemon = True
+            timer.start()
+        else:
+            log.warning(f"Tray notification dropped (no icon): {title}: {message}")
+
+    def show_update(self, version: str):
+        """Notify user that a newer version is available."""
+        self._update_version = version
+        self.notify("Bark Update", f"Version {version} is available")
 
     def _open_update(self):
         import webbrowser
         webbrowser.open("https://github.com/delarc0/bark/releases/latest")
 
     def _quit(self):
+        if IS_WIN:
+            # End the app on the Tk main thread: overlay.quit() runs on_quit
+            # (tray/recorder/hook teardown) AND stops the mainloop. Calling
+            # only _on_quit here left the mainloop running - the pill stayed
+            # on screen and the process never exited.
+            scheduled = False
+            try:
+                self._overlay._root.after(0, self._overlay.quit)
+                scheduled = True
+            except Exception:
+                pass
+            if not scheduled and self._on_quit:
+                # Tk already gone - direct teardown fallback
+                try:
+                    self._on_quit()
+                except Exception:
+                    pass
+            if self._win32_hwnd:
+                import ctypes
+                ctypes.windll.user32.DestroyWindow(self._win32_hwnd)
+                self._win32_hwnd = None
+            return
         if self._on_quit:
             try:
                 self._on_quit()
             except Exception:
                 pass
-        if IS_WIN and self._win32_hwnd:
-            import ctypes
-            ctypes.windll.user32.DestroyWindow(self._win32_hwnd)
-        elif self._icon:
+        if self._icon:
             self._icon.stop()
         if IS_MAC:
             # On Mac, _quit runs on the main thread via _action_queue,

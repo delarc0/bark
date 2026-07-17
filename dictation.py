@@ -103,6 +103,10 @@ def main():
         ctx["transcribe_lock"] = threading.Lock()
 
         def _rebuild():
+            # "loading" while the CPU model builds - decaying to idle here
+            # would show a ready-green pill while ctx["ready"] is still False
+            ui.set_state("loading")
+            ui.set_sublabel("REBUILDING ON CPU...")
             try:
                 ctx["transcriber"] = Transcriber(device="cpu")
                 ctx["ready"] = True
@@ -112,7 +116,8 @@ def main():
             except Exception:
                 log.exception("CPU rebuild after GPU wedge failed")
                 beep_error()
-                ui.set_state("error")
+                ui.set_state("fatal")
+                ui.set_sublabel("RECOVERY FAILED - restart Bark")
             finally:
                 ctx["recovering"] = False
 
@@ -278,7 +283,8 @@ def main():
             if not ctx["hook"].start():
                 log.error("Keyboard hook failed to start. Check Accessibility permission.")
                 beep_error()
-                ui.set_state("error")
+                ui.set_state("fatal")
+                ui.set_sublabel("KEYBOARD HOOK FAILED - see dictation.log")
                 return
             ctx["ready"] = True
             mode = "auto-stop" if cfg["auto_stop"] else "hold-to-record"
@@ -290,7 +296,8 @@ def main():
         except Exception as e:
             log.error(f"Failed to start keyboard hook: {e}", exc_info=True)
             beep_error()
-            ui.set_state("error")
+            ui.set_state("fatal")
+            ui.set_sublabel("KEYBOARD HOOK FAILED - see dictation.log")
 
     def init_backend():
         try:
@@ -307,13 +314,14 @@ def main():
         except Exception as e:
             log.error(f"Failed to initialize: {e}", exc_info=True)
             beep_error()
-            ui.set_state("error")
-            # Show error via tray notification (Windows) so user isn't left with nothing
-            if IS_WIN and ctx.get("tray") and getattr(ctx["tray"], "_icon", None):
+            ui.set_state("fatal")
+            ui.set_sublabel("SETUP FAILED - see dictation.log")
+            # Tray balloon so the user isn't left with just a red dot
+            if ctx.get("tray"):
                 try:
-                    ctx["tray"]._icon.notify(
-                        f"{e}\n\nCheck dictation.log for details.",
+                    ctx["tray"].notify(
                         "Bark failed to start",
+                        f"{e} - check dictation.log for details.",
                     )
                 except Exception:
                     pass

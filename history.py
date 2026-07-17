@@ -35,7 +35,18 @@ def append_history(text: str):
 
 def open_history():
     if not os.path.exists(HISTORY_PATH):
-        return
+        # First run, nothing dictated yet - create a placeholder so the
+        # tray "History" click opens something instead of silently no-oping.
+        # "x" mode: never truncate a file that appeared meanwhile (e.g. a
+        # transcription finishing at the same moment as the click)
+        try:
+            with open(HISTORY_PATH, "x", encoding="utf-8") as f:
+                f.write("No transcriptions yet. Hold the trigger key and speak!\n")
+        except FileExistsError:
+            pass
+        except Exception as e:
+            log.warning(f"Failed to create history file: {e}")
+            return
     try:
         from paths import open_file
         open_file(HISTORY_PATH)

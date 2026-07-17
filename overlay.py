@@ -622,7 +622,7 @@ class Overlay:
             r = DOT_R * rs
             dot_rgb = (255, 215, 0)
             glow_alpha = 60
-        elif st == "error":
+        elif st in ("error", "fatal"):
             r = DOT_R * rs
             dot_rgb = (255, 51, 51)
             glow_alpha = 50
@@ -679,10 +679,29 @@ class Overlay:
             self._tray_ref.set_state(state)
         if state == "recording":
             self.show_overlay()
-        if state in ("idle", "done"):
+        elif state == "fatal":
+            # A dead app must stay visibly red: restore the pill in case a
+            # fade that started earlier (e.g. during "loading") hid it.
+            # show_overlay restores opacity and restarts the animation loop;
+            # _hide_overlay skips "fatal" so the re-armed timer can't fade it.
+            self.show_overlay()
+        # "error" resets the idle timer too, so a pending hide from record
+        # start can't fade the red dot before it has been seen
+        if state in ("idle", "done", "error"):
             self._reset_idle_timer()
         if state == "done":
-            self._root.after(1500, self._update_state, "idle")
+            self._root.after(1500, self._decay_state, "done")
+        elif state == "error":
+            # Transient error: show the red dot long enough to notice, then
+            # recover to idle so the pill fades instead of staying red.
+            # Terminal failures use "fatal" instead, which is sticky.
+            self._root.after(4000, self._decay_state, "error")
+
+    def _decay_state(self, from_state: str):
+        """Timed transition back to idle - only if the state hasn't already
+        moved on (e.g. user started a new recording meanwhile)."""
+        if self._state == from_state:
+            self._update_state("idle")
 
     def set_sublabel(self, text: str):
         try:
@@ -972,8 +991,9 @@ class Overlay:
             )
 
     def _hide_overlay(self):
-        # Don't fade while actively recording or transcribing
-        if self._state in ("recording", "transcribing"):
+        # Don't fade while busy (recording/transcribing/loading), and keep a
+        # dead app's red dot visible (fatal = init/hook failure, nothing works)
+        if self._state in ("recording", "transcribing", "loading", "fatal"):
             return
         self._opacity_target = 0.0
         # Animation loop handles the fade + withdraw when opacity reaches 0
@@ -1005,6 +1025,12 @@ class Overlay:
     # ============================================================ first-run tooltip
 
     def _show_onboarding(self):
+        if not cfg["show_overlay"]:
+            # No pill to anchor to - a floating tip looks broken. Still clear
+            # the flag, or this re-arms (as a no-op) on every launch forever.
+            cfg["first_run"] = False
+            save_config()
+            return
         tip_bg = "#1A1C1E" if self._dark else "#F5F5F3"
         tip_fg = GREEN if self._dark else "#1A1C1E"
 

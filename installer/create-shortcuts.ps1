@@ -1,5 +1,8 @@
 $barkDir = Split-Path -Parent $PSScriptRoot
-if (-not (Test-Path $barkDir)) { $barkDir = "C:\Users\delar\Desktop\Claude\bark" }
+if (-not $barkDir -or -not (Test-Path $barkDir)) {
+    Write-Error "Cannot resolve the Bark repo root. Run this script from its file (not piped): powershell -File installer\create-shortcuts.ps1"
+    exit 1
+}
 $target = Join-Path $barkDir "launch.vbs"
 $icon = Join-Path $barkDir "icon.ico"
 

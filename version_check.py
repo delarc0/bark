@@ -30,7 +30,10 @@ def check_for_update():
                 if lv > cv:
                     return latest
             except (ValueError, TypeError):
-                return latest
+                # Non-numeric tag (pre-release like v1.5-rc1): don't advertise
+                # an update we can't order - better silent than a false flag
+                log.debug(f"Unparseable version tag: {latest!r} vs {current!r}")
+                return None
     except Exception as e:
         log.debug(f"Version check failed: {e}")
     return None

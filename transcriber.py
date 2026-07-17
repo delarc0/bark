@@ -195,11 +195,19 @@ def _ensure_model_cached(on_progress=None):
         from tqdm.auto import tqdm as _base_tqdm
 
         class _ProgressTqdm(_base_tqdm):
+            # Aggregate across all bars: snapshot_download runs one bar per
+            # file, so a per-file percentage keeps jumping back to zero.
+            # A cumulative byte count is monotonic and honest.
+            _cum = [0]
+
             def update(self, n=1):
                 super().update(n)
-                if self.total and self.total > 0:
-                    pct = int(self.n / self.total * 100)
-                    on_progress(f"DOWNLOADING {pct}%")
+                _ProgressTqdm._cum[0] += n
+                mb = _ProgressTqdm._cum[0] / 1e6
+                if mb >= 1:
+                    on_progress(f"DOWNLOADING {mb:,.0f} MB")
+                else:
+                    on_progress("DOWNLOADING MODEL...")
 
         huggingface_hub.snapshot_download(
             MODEL_SIZE,
